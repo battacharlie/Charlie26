@@ -76,6 +76,9 @@ func (s *Server) HTTPSHandler() http.Handler {
 	s.common(mux)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("GET /api/regia/evento", s.onlyRegia(s.handleEventGet))
+	mux.HandleFunc("POST /api/regia/evento", s.onlyRegia(s.handleEventChange))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
 	mux.HandleFunc("GET /static/rnnoise-worklet.js", s.handleRNNoise)
@@ -165,6 +168,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"ips":      s.cfg.IPs,
 		"peers":    s.cfg.Room.Peers(),
 		"channels": s.cfg.Room.Channels(),
+		"mode":     s.cfg.Room.Mode(),
 	})
 }
 
@@ -191,14 +195,22 @@ func (s *Server) handleRNNoise(w http.ResponseWriter, r *http.Request) {
 
 // clientMsg è un messaggio dal browser.
 type clientMsg struct {
-	Type      string                   `json:"type"`
-	Name      string                   `json:"name"`
-	Role      string                   `json:"role"`
-	Channel   string                   `json:"channel"`
-	Channels  []string                 `json:"channels"`
-	SDP       string                   `json:"sdp"`
-	Candidate *webrtc.ICECandidateInit `json:"candidate"`
-	On        bool                     `json:"on"`
+	Type        string                   `json:"type"`
+	Name        string                   `json:"name"`
+	Regia       bool                     `json:"regia"`
+	Session     string                   `json:"session"`
+	Channel     string                   `json:"channel"`
+	Password    string                   `json:"password"`
+	CreateName  string                   `json:"createName"`
+	CreatePass  string                   `json:"createPassword"`
+	OwnerTokens []string                 `json:"ownerTokens"`
+	Channels    []string                 `json:"channels"`
+	Peer        string                   `json:"peer"`
+	MicMode     string                   `json:"micMode"`
+	Video       bool                     `json:"video"`
+	SDP         string                   `json:"sdp"`
+	Candidate   *webrtc.ICECandidateInit `json:"candidate"`
+	On          bool                     `json:"on"`
 }
 
 const (
@@ -272,14 +284,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil {
 				continue
 			}
-			// Fino alla Fase 3 (login) la regia può entrare solo dalla macchina di regia.
-			if m.Role == sfu.RoleRegia && !isLoopback(r.RemoteAddr) {
-				send(sfu.Message{Type: "error", Error: "il ruolo regia è disponibile solo sul computer di regia"})
+			// La regia può entrare solo dalla macchina di regia.
+			if m.Regia && !isLoopback(r.RemoteAddr) {
+				send(sfu.Message{Type: "error", Error: "il pannello di regia funziona solo sul computer di regia"})
 				return
 			}
-			peer, err = s.cfg.Room.Join(sfu.JoinOptions{Name: cleanName(m.Name), Role: m.Role, Channel: m.Channel}, send)
+			if len(m.OwnerTokens) > 32 {
+				m.OwnerTokens = m.OwnerTokens[:32]
+			}
+			peer, err = s.cfg.Room.Join(sfu.JoinRequest{
+				Name:           sfu.CleanName(m.Name),
+				Regia:          m.Regia,
+				Session:        m.Session,
+				Channel:        m.Channel,
+				Password:       m.Password,
+				CreateName:     strings.TrimSpace(m.CreateName),
+				CreatePassword: m.CreatePass,
+				OwnerTokens:    m.OwnerTokens,
+			}, send)
 			if err != nil {
-				send(sfu.Message{Type: "error", Error: "impossibile entrare: " + err.Error()})
+				send(sfu.Message{Type: "error", Error: err.Error()})
+				// Chiusura dopo che il messaggio è partito.
+				time.Sleep(200 * time.Millisecond)
 				return
 			}
 			log.Printf("[%s %s] entrato come %s da %s", peer.ID, peer.Name, peer.Role, r.RemoteAddr)
@@ -301,22 +327,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil {
 				peer.SetListen(m.Channel, m.On)
 			}
+		case "control", "channelSettings", "kick", "promote":
+			if peer == nil {
+				continue
+			}
+			var err error
+			switch m.Type {
+			case "control":
+				err = peer.Control(m.Peer, m.Channel, m.On)
+			case "channelSettings":
+				err = peer.SetChannelSettings(m.Channel, m.MicMode, m.Video)
+			case "kick":
+				err = peer.Kick(m.Peer)
+			case "promote":
+				err = peer.Promote(m.Peer, m.Channel)
+			}
+			if err != nil {
+				send(sfu.Message{Type: "error", Error: err.Error()})
+			}
 		case "ping":
 			// tiene vivo il collegamento anche dove i ping WebSocket non arrivano
 		}
 	}
-}
-
-func cleanName(n string) string {
-	n = strings.TrimSpace(n)
-	if n == "" {
-		return "Senza nome"
-	}
-	r := []rune(n)
-	if len(r) > 24 {
-		r = r[:24]
-	}
-	return string(r)
 }
 
 func isLoopback(addr string) bool {

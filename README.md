@@ -2,7 +2,7 @@
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
-> **Stato: Fase 2**: canali multipli con logica intercom (Produzione + reparti), tasti "parla" per canale, riduzione rumore forte.
+> **Stato: Fase 3**: canali e logica intercom, ruoli e permessi, libero accesso o accesso con credenziali, configurazione dalla console, riduzione rumore forte.
 
 ## Come funziona
 
@@ -49,28 +49,41 @@ I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 
 **Pulsante microfono:** un tocco breve lo apre e lo chiude. Se lo tieni premuto, parli finché non lo rilasci (push-to-talk).
 
-## Canali e ruoli
+## Modalità di accesso
 
-All'ingresso ognuno sceglie il **canale** e il **ruolo**:
+Si sceglie nella **console di regia**, sezione *Configurazione evento*. La configurazione (canali, utenti, modalità) viene salvata da sola nel file `evento.json` della cartella dati e ritrovata al riavvio.
 
-| Ruolo | Canali | Tasti "parla" |
+### Libero accesso (predefinita)
+- Un **QR unico** per tutti. Chi entra scrive il nome e sceglie il canale.
+- Chiunque può **creare un sottocanale** (anche protetto da password) e ne diventa **caporeparto**. Il telefono se lo ricorda: ricaricando la pagina si rientra da caporeparto senza rimettere la password.
+- La regia può **nominare caporeparto** un tecnico dalla lista dei collegati, per esempio se chi ha creato il canale va via.
+
+### Accesso con credenziali
+- La regia crea gli **utenti** (nome utente, nome mostrato, password), con ruolo **Tecnico** o **Caporeparto** e i canali assegnati.
+- Il telefono mostra il **login**. Ruolo e canali li decide la regia.
+- Le modifiche valgono subito anche per chi è già collegato: un canale aggiunto compare sul telefono, un utente eliminato viene scollegato.
+- Cambiando modalità tutti i collegati vengono scollegati e devono rientrare.
+
+## Ruoli e permessi
+
+| Ruolo | Canali | Poteri |
 |---|---|---|
-| **Tecnico** | solo il canale scelto | un grande pulsante rotondo |
-| **Caporeparto** | Produzione + il proprio reparto | due tasti separati |
-| **Regia** (console) | tutti | uno per canale + **PARLA A TUTTI** |
+| **Regia** (console) | tutti | parla a uno, a più o a tutti i canali; configura l'evento; scollega chiunque; gestisce ogni canale |
+| **Caporeparto** | Produzione + i propri reparti | due tasti PARLA; con ⚙ sul proprio canale gestisce i microfoni degli utenti |
+| **Tecnico** | quelli scelti/assegnati | usa il microfono come deciso dal caporeparto |
 
-- Si sente chi sta parlando su un canale che si ascolta. Esempi:
-  - il caporeparto video che parla in Produzione lo sentono la regia e gli altri caporeparto, ma non i suoi cameraman;
-  - la regia che parla solo al canale Audio la sente solo il reparto audio.
-- Ogni riga canale mostra **chi sta parlando** e ha il tasto **🔊** per smettere di ascoltare quel canale. Chi ha più canali ha anche il **volume per canale**. Su iPhone il volume della pagina viene ignorato e conta solo quello del telefono.
-- In console i tasti **1…9** parlano al canale corrispondente e **Spazio** parla a tutti: tocco breve per agganciare, tenere premuto per parlare.
-- Il ruolo "Regia" è disponibile solo dalla console aperta sul computer di regia. Login e password arriveranno nella Fase 3.
+Con l'ingranaggio ⚙ il caporeparto, e la regia su ogni canale, sceglie come gli utenti usano il microfono:
+- **Libero**: tocco per aprire e chiudere, oppure tenere premuto per parlare;
+- **Solo push-to-talk**: si parla solo tenendo premuto;
+- **Solo il caporeparto apre**: il tecnico non può aprirsi il microfono; ci pensa il caporeparto con **Apri mic** e **Chiudi mic**. Sul telefono del tecnico compare "APERTO DAL CAPOREPARTO".
 
-Canali predefiniti: Produzione, Video, Audio, Luci. Per cambiarli:
+Il caporeparto può anche **chiudere il microfono** di un singolo utente in qualsiasi momento, e decidere se nel canale arriva il **video della regia** (attivo dalla Fase 5).
 
-```
-intercom.exe -principale "Produzione" -canali "Video,Audio,Luci,Palco,Streaming"
-```
+**Chi sente chi:** si sente chi sta parlando su un canale che si ascolta. Il caporeparto video che parla in Produzione lo sentono la regia e gli altri caporeparto, ma non i suoi cameraman. Ogni riga canale mostra chi sta parlando e ha il tasto **🔊** per smettere di ascoltare quel canale. Chi ha più canali ha anche il volume per canale; su iPhone il volume della pagina viene ignorato e conta solo quello del telefono.
+
+**Console:** i tasti **1…9** parlano al canale corrispondente, **Spazio** a tutti. Tocco breve per agganciare, tenere premuto per parlare. Il pannello di regia e la configurazione funzionano solo sul computer di regia (`https://localhost…`).
+
+Canali iniziali di un evento nuovo: Produzione, Video, Audio, Luci. Si cambiano dalla console oppure, solo al primo avvio, con `-principale` e `-canali`.
 
 ### Riduzione rumore forte
 L'interruttore **Riduzione rumore forte** attiva RNNoise, lo stesso filtro di Jitsi Meet. Serve vicino al palco, in sala macchine o dentro un camion regia. Nelle prove ha tolto altri ~30 dB di rumore di fondo rispetto al filtro normale del browser. Aggiunge 10 ms di ritardo e consuma un po' più batteria. La scelta resta memorizzata sul telefono.
@@ -86,11 +99,11 @@ Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
 | `-porta-udp` | 8443 | porta UDP per l'audio |
 | `-porta-aiuto` | 8080 | pagina di aiuto in HTTP (0 = disattiva) |
 | `-dati` | cartella utente | dove salvare certificati ed eventi |
-| `-principale` | Produzione | nome del canale principale |
-| `-canali` | Video,Audio,Luci | reparti, separati da virgola |
+| `-principale` | Produzione | nome del canale principale (solo per un evento nuovo) |
+| `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
 
-Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Per ricreare il certificato da zero, cancella la sottocartella `certificati`.
+Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro) e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
 ### Certificato di dominio (nessun avviso sui telefoni)
 Se hai un certificato valido per un dominio (es. wildcard `*.intercom.tuodominio.it`) e un DNS che risolve `192-168-1-10.intercom.tuodominio.it` su `192.168.1.10`:

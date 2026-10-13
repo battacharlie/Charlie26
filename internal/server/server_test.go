@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 
 	"github.com/battacharlie/charlie26/internal/certs"
+	"github.com/battacharlie/charlie26/internal/evento"
 	"github.com/battacharlie/charlie26/internal/sfu"
 	"github.com/battacharlie/charlie26/web"
 )
@@ -30,9 +32,12 @@ func freeUDPPort(t *testing.T) int {
 	return c.LocalAddr().(*net.UDPAddr).Port
 }
 
-func startServer(t *testing.T) (*httptest.Server, *sfu.Room) {
+func startServer(t *testing.T, ev *evento.Event) (*httptest.Server, *sfu.Room) {
 	t.Helper()
-	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t), Channels: sfu.DefaultChannels()})
+	if ev == nil {
+		ev = evento.New("Produzione", []string{"Video", "Audio", "Luci"})
+	}
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t), Event: ev})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +67,26 @@ type fakePhone struct {
 	mu      sync.Mutex
 	packets map[string]*atomic.Int64 // id mittente -> pacchetti ricevuti
 	welcome chan string
+	msgs    chan sfu.Message // altri messaggi dal server (mute, kicked, me…)
 }
 
-func newFakePhone(t *testing.T, ts *httptest.Server, name, role, channel string) *fakePhone {
+// login ottiene un gettone di sessione (modalità credenziali).
+func login(t *testing.T, ts *httptest.Server, user, pass string) string {
+	t.Helper()
+	resp, err := ts.Client().Post(ts.URL+"/api/login", "application/json", strings.NewReader(`{"username":"`+user+`","password":"`+pass+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct{ Session, Error string }
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if out.Session == "" {
+		t.Fatalf("login %s: %s", user, out.Error)
+	}
+	return out.Session
+}
+
+func newFakePhone(t *testing.T, ts *httptest.Server, name string, join map[string]any) *fakePhone {
 	t.Helper()
 	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	ws, _, err := dialer.Dial("wss"+strings.TrimPrefix(ts.URL, "https")+"/ws", nil)
@@ -86,7 +108,7 @@ func newFakePhone(t *testing.T, ts *httptest.Server, name, role, channel string)
 	if _, err := pc.AddTrack(audio); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakePhone{t: t, name: name, ws: ws, pc: pc, audio: audio, packets: map[string]*atomic.Int64{}, welcome: make(chan string, 1)}
+	f := &fakePhone{t: t, name: name, ws: ws, pc: pc, audio: audio, packets: map[string]*atomic.Int64{}, welcome: make(chan string, 1), msgs: make(chan sfu.Message, 64)}
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c != nil {
 			f.write(map[string]any{"type": "candidate", "candidate": c.ToJSON()})
@@ -105,7 +127,9 @@ func newFakePhone(t *testing.T, ts *httptest.Server, name, role, channel string)
 	t.Cleanup(func() { ws.Close(); pc.Close() })
 
 	go f.loop()
-	f.write(map[string]any{"type": "join", "name": name, "role": role, "channel": channel})
+	join["type"] = "join"
+	join["name"] = name
+	f.write(join)
 	select {
 	case f.id = <-f.welcome:
 	case <-time.After(5 * time.Second):
@@ -147,6 +171,9 @@ func (f *fakePhone) loop() {
 			f.welcome <- m.ID
 		case "error":
 			f.t.Logf("%s: errore dal server: %s", f.name, m.Error)
+			f.msgs <- m
+		case "mute", "kicked", "me", "ownerToken":
+			f.msgs <- m
 		case "offer":
 			if f.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 				return
@@ -249,14 +276,47 @@ func matches(got map[string]map[string]bool, want map[string][]string) bool {
 	return true
 }
 
-// Scenario completo: regia, caporeparto video, cameraman, fonico.
-func TestIntercomChannels(t *testing.T) {
-	ts, room := startServer(t)
+// expectMsg attende un messaggio di un certo tipo dal server.
+func expectMsg(t *testing.T, f *fakePhone, typ string) sfu.Message {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case m := <-f.msgs:
+			if m.Type == typ {
+				return m
+			}
+		case <-deadline:
+			t.Fatalf("%s: nessun messaggio %q", f.name, typ)
+		}
+	}
+}
 
-	regia := newFakePhone(t, ts, "Regia", sfu.RoleRegia, "")
-	capo := newFakePhone(t, ts, "CapoVideo", sfu.RoleCaporeparto, "video")
-	cam := newFakePhone(t, ts, "Cam1", sfu.RoleTecnico, "video")
-	fon := newFakePhone(t, ts, "Fonico", sfu.RoleTecnico, "audio")
+func credentialsEvent(t *testing.T) *evento.Event {
+	e := evento.New("Produzione", []string{"Video", "Audio", "Luci"})
+	e.Mode = evento.ModeCredenziali
+	for _, u := range []evento.User{
+		{Username: "capovideo", Name: "CapoVideo", Role: evento.RoleAdmin, Channels: []string{"video"}},
+		{Username: "cam1", Name: "Cam1", Role: evento.RoleUser, Channels: []string{"video"}},
+		{Username: "cam2", Name: "Cam2", Role: evento.RoleUser, Channels: []string{"video"}},
+		{Username: "fonico", Name: "Fonico", Role: evento.RoleUser, Channels: []string{"audio"}},
+	} {
+		if err := e.SetUser(u, "pass-"+u.Username); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return e
+}
+
+// Scenario completo con login: regia, caporeparto video, cameraman, fonico.
+func TestIntercomChannels(t *testing.T) {
+	ts, room := startServer(t, credentialsEvent(t))
+	user := func(u string) map[string]any { return map[string]any{"session": login(t, ts, u, "pass-"+u)} }
+
+	regia := newFakePhone(t, ts, "Regia", map[string]any{"regia": true})
+	capo := newFakePhone(t, ts, "CapoVideo", user("capovideo"))
+	cam := newFakePhone(t, ts, "Cam1", user("cam1"))
+	fon := newFakePhone(t, ts, "Fonico", user("fonico"))
 	all := []*fakePhone{regia, capo, cam, fon}
 
 	// Nessuno preme "parla": silenzio totale, anche se i microfoni mandano audio.
@@ -292,28 +352,134 @@ func TestIntercomChannels(t *testing.T) {
 	expectHearing(t, all, map[string][]string{"CapoVideo": {"Cam1"}})
 	regia.write(map[string]any{"type": "listen", "channel": "video", "on": true})
 	expectHearing(t, all, map[string][]string{"CapoVideo": {"Cam1"}, "Regia": {"Cam1"}})
-	cam.talk()
 
-	// Chi entra dopo è subito inserito nella logica.
-	cam2 := newFakePhone(t, ts, "Cam2", sfu.RoleTecnico, "video")
-	all = append(all, cam2)
+	// Il caporeparto chiude il microfono del cameraman.
+	capo.write(map[string]any{"type": "control", "peer": cam.id, "channel": "video", "on": false})
+	expectMsg(t, cam, "mute")
+	expectHearing(t, all, map[string][]string{})
+
+	// Modalità "solo il caporeparto apre": il cameraman non riesce ad aprirsi da solo...
+	capo.write(map[string]any{"type": "channelSettings", "channel": "video", "micMode": evento.MicAdmin, "video": true})
+	time.Sleep(200 * time.Millisecond)
+	cam.talk("video")
+	expectHearing(t, all, map[string][]string{})
+	// ...ma il caporeparto può aprirglielo.
+	capo.write(map[string]any{"type": "control", "peer": cam.id, "channel": "video", "on": true})
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Cam1"}, "Regia": {"Cam1"}})
+	capo.write(map[string]any{"type": "control", "peer": cam.id, "channel": "video", "on": false})
+	expectHearing(t, all, map[string][]string{})
+
+	// Il fonico non ha poteri sul canale video.
+	fon.write(map[string]any{"type": "control", "peer": cam.id, "channel": "video", "on": true})
+	expectMsg(t, fon, "error")
+	expectHearing(t, all, map[string][]string{})
+	capo.write(map[string]any{"type": "channelSettings", "channel": "video", "micMode": evento.MicLibero, "video": true})
+
+	// La regia sposta il fonico anche sul canale video: lo sente subito.
+	err := room.UpdateEvent(func(e *evento.Event) error {
+		u := *e.User("fonico")
+		u.Channels = []string{"audio", "video"}
+		return e.SetUser(u, "")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectMsg(t, fon, "me")
 	regia.talk("video")
-	expectHearing(t, all, map[string][]string{"CapoVideo": {"Regia"}, "Cam1": {"Regia"}, "Cam2": {"Regia"}})
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Regia"}, "Cam1": {"Regia"}, "Fonico": {"Regia"}})
 	regia.talk()
 
-	// Chi esce sparisce dalla lista.
-	cam2.ws.Close()
+	// Chi entra dopo è subito inserito nella logica.
+	cam2 := newFakePhone(t, ts, "Cam2", user("cam2"))
+	all = append(all, cam2)
+	regia.talk("video")
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Regia"}, "Cam1": {"Regia"}, "Cam2": {"Regia"}, "Fonico": {"Regia"}})
+	regia.talk()
+
+	// La regia elimina l'utente cam2: viene scollegato.
+	if err := room.UpdateEvent(func(e *evento.Event) error { return e.RemoveUser("cam2") }); err != nil {
+		t.Fatal(err)
+	}
+	expectMsg(t, cam2, "kicked")
 	deadline := time.Now().Add(5 * time.Second)
 	for len(room.Peers()) != 4 {
 		if time.Now().After(deadline) {
-			t.Fatalf("il partecipante uscito è ancora in lista: %v", room.Peers())
+			t.Fatalf("il partecipante eliminato è ancora in lista: %v", room.Peers())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
+// Libero accesso: chi crea un sottocanale ne è responsabile.
+func TestFreeAccessSubchannel(t *testing.T) {
+	ts, _ := startServer(t, evento.New("Produzione", nil))
+
+	regia := newFakePhone(t, ts, "Regia", map[string]any{"regia": true})
+	luca := newFakePhone(t, ts, "Luca", map[string]any{"createName": "Palco", "createPassword": "1234"})
+	ugo := newFakePhone(t, ts, "Ugo", map[string]any{"channel": "palco", "password": "1234"})
+	anna := newFakePhone(t, ts, "Anna", map[string]any{"channel": "produzione"})
+	all := []*fakePhone{regia, luca, ugo, anna}
+
+	ugo.talk("palco")
+	expectHearing(t, all, map[string][]string{"Luca": {"Ugo"}, "Regia": {"Ugo"}})
+	ugo.talk()
+	luca.talk("produzione")
+	expectHearing(t, all, map[string][]string{"Regia": {"Luca"}, "Anna": {"Luca"}})
+	luca.talk()
+	// Luca è responsabile di Palco: può chiudere il microfono di Ugo.
+	ugo.talk("palco")
+	expectHearing(t, all, map[string][]string{"Luca": {"Ugo"}, "Regia": {"Ugo"}})
+	luca.write(map[string]any{"type": "control", "peer": ugo.id, "channel": "palco", "on": false})
+	expectMsg(t, ugo, "mute")
+	expectHearing(t, all, map[string][]string{})
+}
+
+func TestRegiaAPI(t *testing.T) {
+	ts, room := startServer(t, nil)
+	post := func(body string) (int, string) {
+		resp, err := ts.Client().Post(ts.URL+"/api/regia/evento", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := post(`{"op":"addChannel","name":"Palco"}`); code != 200 || !strings.Contains(body, `"palco"`) {
+		t.Fatalf("aggiunta canale: %d %s", code, body)
+	}
+	if code, _ := post(`{"op":"removeChannel","id":"produzione"}`); code != 400 {
+		t.Fatal("il canale principale non deve essere eliminabile")
+	}
+	if code, body := post(`{"op":"setUser","user":{"username":"marco","role":"user","channels":["palco"]},"password":"abcd"}`); code != 200 || strings.Contains(body, "$2a$") {
+		t.Fatalf("aggiunta utente: %d %s (non deve mostrare l'impronta della password)", code, body)
+	}
+	// Richieste da un altro sito (o non JSON) vengono rifiutate.
+	for _, h := range []map[string]string{
+		{"Content-Type": "text/plain"},
+		{"Content-Type": "application/json", "Origin": "https://sito-malevolo.example"},
+	} {
+		req, _ := http.NewRequest("POST", ts.URL+"/api/regia/evento", strings.NewReader(`{"op":"addChannel","name":"Hack"}`))
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("richiesta %v: stato %d, atteso 403", h, resp.StatusCode)
+		}
+	}
+	if code, _ := post(`{"op":"mode","mode":"credenziali"}`); code != 200 || room.Mode() != evento.ModeCredenziali {
+		t.Fatal("cambio modalità non riuscito")
+	}
+	login(t, ts, "marco", "abcd")
+}
+
 func TestPagesAndCA(t *testing.T) {
-	ts, _ := startServer(t)
+	ts, _ := startServer(t, nil)
 	client := ts.Client()
 	for path, want := range map[string]string{
 		"/":                          "Intercom di produzione",

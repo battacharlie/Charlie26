@@ -1,7 +1,7 @@
 // Package sfu è il "centralino" WebRTC: riceve l'audio (e in futuro il video)
 // di ogni partecipante e lo inoltra agli altri, senza mescolarlo.
 //
-// Logica intercom (vedi routing.go):
+// Logica intercom (vedi routing.go, accessi e permessi in access.go):
 //   - ogni partecipante è membro di uno o più canali;
 //   - preme "parla" su uno o più dei suoi canali;
 //   - sente chi sta parlando su un canale che lui ascolta.
@@ -12,7 +12,6 @@
 package sfu
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -26,6 +25,8 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
+
+	"github.com/battacharlie/charlie26/internal/evento"
 )
 
 // Config della parte WebRTC.
@@ -33,33 +34,24 @@ type Config struct {
 	// UDPPort è l'unica porta UDP usata da tutti i flussi audio/video.
 	// Una porta sola semplifica molto il firewall di Windows.
 	UDPPort int
-	// Channels: il primo con Main=true è il canale "Produzione".
-	Channels []Channel
+	// Event è la configurazione iniziale (canali, utenti, modalità).
+	Event *evento.Event
+	// Save viene chiamata a ogni modifica dell'evento (può essere nil).
+	Save func(*evento.Event) error
 }
-
-// Channel è un canale intercom.
-type Channel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Main bool   `json:"main,omitempty"`
-}
-
-// Ruoli (Fase 2: dichiarati da chi entra; login e permessi nella Fase 3).
-const (
-	RoleRegia       = "regia"       // SupAdmin: tutti i canali
-	RoleCaporeparto = "caporeparto" // Admin: Produzione + il proprio reparto
-	RoleTecnico     = "tecnico"     // User: il canale scelto
-)
 
 // Message è un messaggio verso il browser (serializzato in JSON dal server).
 type Message struct {
-	Type     string     `json:"type"`
-	ID       string     `json:"id,omitempty"`
-	SDP      string     `json:"sdp,omitempty"`
-	Peers    []PeerInfo `json:"peers,omitempty"`
-	Channels []Channel  `json:"channels,omitempty"`
-	Me       *PeerInfo  `json:"me,omitempty"`
-	Error    string     `json:"error,omitempty"`
+	Type     string        `json:"type"`
+	ID       string        `json:"id,omitempty"`
+	SDP      string        `json:"sdp,omitempty"`
+	Peers    []PeerInfo    `json:"peers,omitempty"`
+	Channels []ChannelInfo `json:"channels,omitempty"`
+	Mode     string        `json:"mode,omitempty"`
+	Me       *PeerInfo     `json:"me,omitempty"`
+	Channel  string        `json:"channel,omitempty"`
+	Token    string        `json:"token,omitempty"`
+	Error    string        `json:"error,omitempty"`
 }
 
 // PeerInfo descrive un partecipante nella lista mostrata ai client.
@@ -67,16 +59,11 @@ type PeerInfo struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
 	Role     string   `json:"role"`
-	Channels []string `json:"channels"`        // canali di cui è membro
-	Talk     []string `json:"talk"`            // canali su cui sta parlando ora
-	Muted    []string `json:"muted,omitempty"` // canali che ha smesso di ascoltare
-}
-
-// JoinOptions sono i dati dichiarati da chi entra.
-type JoinOptions struct {
-	Name    string
-	Role    string
-	Channel string // reparto scelto (ignorato per la regia)
+	Channels []string `json:"channels"`         // canali di cui è membro
+	Admin    []string `json:"admin,omitempty"`  // canali di cui è responsabile
+	Talk     []string `json:"talk"`             // canali su cui sta parlando ora
+	Forced   []string `json:"forced,omitempty"` // canali aperti dal suo responsabile
+	Muted    []string `json:"muted,omitempty"`  // canali che ha smesso di ascoltare
 }
 
 // Room è l'insieme di canali e partecipanti.
@@ -85,7 +72,9 @@ type Room struct {
 	mux ice.UDPMux
 
 	mu       sync.Mutex
-	channels []Channel
+	event    *evento.Event
+	save     func(*evento.Event) error
+	sessions map[string]string // gettone di sessione -> nome utente (modalità credenziali)
 	peers    map[string]*Peer
 	tracks   map[string]*forward // flussi in arrivo, per id
 	nextID   int
@@ -121,8 +110,11 @@ type Peer struct {
 	room   *Room
 	pc     *webrtc.PeerConnection
 	send   func(Message)
+	ident  identity        // chi è, da cui si ricavano canali e permessi
 	member map[string]bool // canali di cui è membro
-	talk   map[string]bool // canali su cui sta parlando
+	admin  map[string]bool // canali di cui è responsabile
+	talk   map[string]bool // canali su cui ha chiesto di parlare
+	forced map[string]bool // canali aperti dal suo responsabile
 	muted  map[string]bool // canali che non vuole ascoltare
 
 	senders    map[string]*dest // id flusso -> copia verso questo peer
@@ -132,10 +124,10 @@ type Peer struct {
 
 // NewRoom prepara il motore WebRTC.
 func NewRoom(cfg Config) (*Room, error) {
-	if len(cfg.Channels) == 0 {
-		cfg.Channels = DefaultChannels()
+	if cfg.Event == nil {
+		cfg.Event = evento.New("Produzione", nil)
 	}
-	if err := validateChannels(cfg.Channels); err != nil {
+	if err := cfg.Event.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -170,7 +162,9 @@ func NewRoom(cfg Config) (*Room, error) {
 	return &Room{
 		api:      api,
 		mux:      mux,
-		channels: append([]Channel(nil), cfg.Channels...),
+		event:    cfg.Event.Clone(),
+		save:     cfg.Save,
+		sessions: map[string]string{},
 		peers:    map[string]*Peer{},
 		tracks:   map[string]*forward{},
 	}, nil
@@ -190,19 +184,17 @@ func (r *Room) Close() error {
 	return r.mux.Close()
 }
 
-// Channels restituisce l'elenco dei canali.
-func (r *Room) Channels() []Channel {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]Channel(nil), r.channels...)
-}
-
 // Join aggiunge un partecipante e avvia la prima negoziazione.
 // send viene chiamata per ogni messaggio da inoltrare al browser;
 // non deve bloccare a lungo.
-func (r *Room) Join(opts JoinOptions, send func(Message)) (*Peer, error) {
+func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 	r.mu.Lock()
-	member, err := r.membershipLocked(opts.Role, opts.Channel)
+	ident, newOwner, err := r.admitLocked(req)
+	if err != nil {
+		r.mu.Unlock()
+		return nil, err
+	}
+	res, err := r.resolveLocked(ident)
 	r.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -223,13 +215,16 @@ func (r *Room) Join(opts JoinOptions, send func(Message)) (*Peer, error) {
 	r.nextID++
 	p := &Peer{
 		ID:      fmt.Sprintf("p%d", r.nextID),
-		Name:    opts.Name,
-		Role:    opts.Role,
+		Name:    res.name,
+		Role:    res.role,
 		room:    r,
 		pc:      pc,
 		send:    send,
-		member:  member,
+		ident:   ident,
+		member:  res.member,
+		admin:   res.admin,
 		talk:    map[string]bool{},
+		forced:  map[string]bool{},
 		muted:   map[string]bool{},
 		senders: map[string]*dest{},
 	}
@@ -246,14 +241,24 @@ func (r *Room) Join(opts JoinOptions, send func(Message)) (*Peer, error) {
 
 	r.mu.Lock()
 	info := p.infoLocked()
-	send(Message{Type: "welcome", ID: p.ID, Channels: r.channels, Me: &info})
+	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info}
+	if newOwner != nil {
+		welcome.Channel, welcome.Token = newOwner.channel, newOwner.token
+	}
+	send(welcome)
 	r.syncLocked()
 	if p.pc.LocalDescription() == nil {
 		// Nessun flusso da ricevere ancora: serve comunque una prima offerta
 		// perché il browser possa iniziare a inviare il microfono.
 		p.negotiateLocked()
 	}
-	r.broadcastPeersLocked()
+	if newOwner != nil {
+		// È nato un nuovo canale: la regia (e chiunque ne abbia diritto) ne diventa
+		// subito membro.
+		r.refreshLocked()
+	} else {
+		r.broadcastPeersLocked()
+	}
 	r.mu.Unlock()
 	return p, nil
 }
@@ -465,7 +470,7 @@ func (p *Peer) SetTalk(channels []string) {
 	defer r.mu.Unlock()
 	next := map[string]bool{}
 	for _, c := range channels {
-		if p.member[c] {
+		if r.canTalkLocked(p, c) {
 			next[c] = true
 		}
 	}
@@ -517,14 +522,32 @@ func (p *Peer) Close() {
 }
 
 func (p *Peer) infoLocked() PeerInfo {
+	r := p.room
 	return PeerInfo{
 		ID:       p.ID,
 		Name:     p.Name,
 		Role:     p.Role,
-		Channels: p.room.orderedLocked(p.member),
-		Talk:     p.room.orderedLocked(p.talk),
-		Muted:    p.room.orderedLocked(p.muted),
+		Channels: r.orderedLocked(p.member),
+		Admin:    r.orderedLocked(p.admin),
+		Talk:     r.orderedLocked(p.speaking()),
+		Forced:   r.orderedLocked(p.forced),
+		Muted:    r.orderedLocked(p.muted),
 	}
+}
+
+// speaking: canali su cui la sua voce esce davvero (chiesti da lui o aperti dal responsabile).
+func (p *Peer) speaking() map[string]bool {
+	if len(p.forced) == 0 {
+		return p.talk
+	}
+	out := make(map[string]bool, len(p.talk)+len(p.forced))
+	for c := range p.talk {
+		out[c] = true
+	}
+	for c := range p.forced {
+		out[c] = true
+	}
+	return out
 }
 
 func (r *Room) broadcastPeersLocked() {
@@ -554,5 +577,3 @@ func (r *Room) Peers() []PeerInfo {
 	defer r.mu.Unlock()
 	return r.peerListLocked()
 }
-
-var errUnknownChannel = errors.New("canale inesistente")

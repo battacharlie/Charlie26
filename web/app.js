@@ -5,13 +5,14 @@
   const $ = (id) => document.getElementById(id);
   const isConsole = document.body.dataset.role === 'regia';
   const HOLD_MS = 350; // oltre questo tempo una pressione è "push-to-talk"
+  const CREATE = '__nuovo__';
 
   const state = {
     name: '',
-    role: isConsole ? 'regia' : 'tecnico',
-    channel: '',
+    mode: '',            // 'libero' | 'credenziali'
+    joinReq: null,       // dati di ingresso, ripetuti a ogni riconnessione
     channels: [],        // tutti i canali dell'evento
-    me: null,            // { id, role, channels }
+    me: null,            // { id, role, channels, admin, forced }
     peers: [],
     stream: null,        // microfono locale
     ws: null,
@@ -21,6 +22,7 @@
     talk: new Set(),     // canali su cui sto parlando (latched ∪ held)
     listenOff: new Set(),
     volume: loadJSON('intercom.volume', {}),
+    openAdmin: new Set(),  // canali con il pannello del responsabile aperto
     retry: 0,
     retryTimer: null,
     audioEls: new Map(),   // id partecipante -> <audio>
@@ -32,6 +34,7 @@
     sender: null,        // RTCRtpSender del microfono
     wakeLock: null,
     joined: false,
+    rebuildPending: false,
   };
 
   function loadJSON(key, def) {
@@ -41,58 +44,103 @@
     try { localStorage.setItem(key, JSON.stringify(v)); } catch (_) {}
   }
   const chName = (id) => (state.channels.find((c) => c.id === id) || { name: id }).name;
+  const chInfo = (id) => state.channels.find((c) => c.id === id) || {};
+  // Gettoni da caporeparto, conservati sul telefono (libero accesso).
+  const ownerTokens = () => loadJSON('intercom.owner', {});
+  const roleLabel = (r) => ({ regia: 'Regia', caporeparto: 'Caporeparto', tecnico: 'Tecnico' }[r] || r);
+  const micModeLabel = { libero: 'Libero', ptt: 'Solo push-to-talk', admin: 'Solo il caporeparto apre' };
 
   // ---------- Ingresso ----------
   const nameInput = $('nameInput');
-  nameInput.value = loadJSON('intercom.name', isConsole ? 'Regia' : '');
+  if (nameInput) nameInput.value = loadJSON('intercom.name', isConsole ? 'Regia' : '');
   if (isConsole && !nameInput.value) nameInput.value = 'Regia';
 
-  fetch('/api/info').then((r) => r.json()).then((info) => {
-    state.channels = info.channels || [];
+  function loadInfo() {
+    return fetch('/api/info').then((r) => r.json()).then((info) => {
+      state.channels = info.channels || [];
+      state.mode = info.mode;
+      if (!isConsole) prepareJoinForm();
+    }).catch(() => showJoinError('Server non raggiungibile. Ricarica la pagina.'));
+  }
+  loadInfo();
+
+  function prepareJoinForm() {
+    const cred = state.mode === 'credenziali';
+    $('freeForm').classList.toggle('hidden', cred);
+    $('loginForm').classList.toggle('hidden', !cred);
+    if (cred) {
+      $('userInput').value = loadJSON('intercom.user', '');
+      return;
+    }
     const sel = $('channelInput');
-    if (!sel) return;
+    sel.textContent = '';
     for (const c of state.channels) {
       const o = document.createElement('option');
       o.value = c.id;
-      o.textContent = c.name;
+      o.textContent = c.name + (c.protected ? ' 🔒' : '');
       sel.appendChild(o);
     }
+    const o = document.createElement('option');
+    o.value = CREATE;
+    o.textContent = '➕ Crea un nuovo canale…';
+    sel.appendChild(o);
     const saved = loadJSON('intercom.join', {});
     if (saved.channel && state.channels.some((c) => c.id === saved.channel)) sel.value = saved.channel;
-    if (saved.role) {
-      const r = document.querySelector(`input[name=role][value="${saved.role}"]`);
-      if (r) r.checked = true;
-    }
-    sel.addEventListener('change', updateRoleField);
-    updateRoleField();
-  }).catch(() => showJoinError('Server non raggiungibile. Ricarica la pagina.'));
+    sel.onchange = updateFreeFields;
+    updateFreeFields();
+  }
 
-  function updateRoleField() {
-    const sel = $('channelInput');
-    const main = state.channels.find((c) => c.main);
-    const isMain = main && sel.value === main.id;
-    $('roleField').classList.toggle('hidden', !!isMain);
-    if (main) $('roleHint').textContent = `Il caporeparto parla anche nel canale ${main.name}.`;
+  function updateFreeFields() {
+    const v = $('channelInput').value;
+    const create = v === CREATE;
+    const owned = !!ownerTokens()[v];
+    $('createFields').classList.toggle('hidden', !create);
+    $('passwordField').classList.toggle('hidden', create || !chInfo(v).protected || owned);
   }
 
   $('joinBtn').addEventListener('click', join);
-  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+  document.querySelectorAll('#joinView input').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); }));
 
   async function join() {
     $('joinError').classList.add('hidden');
-    state.name = nameInput.value.trim() || 'Senza nome';
-    saveJSON('intercom.name', state.name);
-    if (!isConsole) {
-      state.channel = $('channelInput').value;
-      const r = document.querySelector('input[name=role]:checked');
-      state.role = $('roleField').classList.contains('hidden') ? 'tecnico' : (r ? r.value : 'tecnico');
-      saveJSON('intercom.join', { channel: state.channel, role: state.role });
+    let req;
+    if (isConsole) {
+      state.name = nameInput.value.trim() || 'Regia';
+      saveJSON('intercom.name', state.name);
+      req = { regia: true, name: state.name };
+    } else if (state.mode === 'credenziali') {
+      const username = $('userInput').value.trim();
+      const password = $('userPassword').value;
+      if (!username || !password) return showJoinError('Scrivi nome utente e password.');
+      try {
+        const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        const out = await r.json();
+        if (!r.ok) return showJoinError(out.error || 'Accesso non riuscito.');
+        saveJSON('intercom.user', username);
+        $('userPassword').value = '';
+        req = { session: out.session };
+      } catch (_) {
+        return showJoinError('Server non raggiungibile.');
+      }
+    } else {
+      state.name = nameInput.value.trim();
+      if (!state.name) return showJoinError('Scrivi il tuo nome.');
+      saveJSON('intercom.name', state.name);
+      const ch = $('channelInput').value;
+      if (ch === CREATE) {
+        const cname = $('createName').value.trim();
+        if (!cname) return showJoinError('Scrivi il nome del nuovo canale.');
+        req = { name: state.name, createName: cname, createPassword: $('createPassword').value };
+      } else {
+        req = { name: state.name, channel: ch, password: $('passwordInput').value };
+        saveJSON('intercom.join', { channel: ch });
+      }
     }
+    state.joinReq = req;
 
     if (!window.isSecureContext || !navigator.mediaDevices) {
-      showJoinError('Questa pagina non è in HTTPS: il browser blocca il microfono. ' +
+      return showJoinError('Questa pagina non è in HTTPS: il browser blocca il microfono. ' +
         'Apri l\'indirizzo che inizia con https:// (vedi la <a href="/aiuto">pagina di aiuto</a>).');
-      return;
     }
     try {
       state.stream = state.stream || await navigator.mediaDevices.getUserMedia({
@@ -100,14 +148,16 @@
         video: false,
       });
     } catch (e) {
-      showJoinError('Microfono non disponibile (' + e.name + '). Controlla di aver premuto "Consenti". ' +
+      return showJoinError('Microfono non disponibile (' + e.name + '). Controlla di aver premuto "Consenti". ' +
         'Su iPhone: Impostazioni › Safari › Microfono. Su Android: tocca il lucchetto nella barra degli indirizzi › Autorizzazioni.');
-      return;
     }
     addNoiseSwitch();
     if (state.noise) await setNoise(true);
+    state.latched.clear();
+    state.held.clear();
     applyTalk(true);
     startLevelMeter();
+    state.me = null;
     $('joinView').classList.add('hidden');
     $('talkView').classList.remove('hidden');
     state.joined = true;
@@ -123,12 +173,20 @@
 
   function backToJoin(message) {
     state.joined = false;
+    state.me = null;
     clearTimeout(state.retryTimer);
     teardown();
+    for (const t of micTracks()) t.enabled = false;
     $('talkView').classList.add('hidden');
     $('joinView').classList.remove('hidden');
-    showJoinError(message);
+    $('channelList').textContent = '';
+    $('bigMicArea').textContent = '';
+    if (message) showJoinError(message);
+    loadInfo(); // i canali potrebbero essere cambiati
   }
+
+  const exitBtn = $('exitBtn');
+  if (exitBtn) exitBtn.addEventListener('click', () => { if (confirm('Uscire dall\'intercom?')) backToJoin(''); });
 
   // ---------- Collegamento al server ----------
   function connect() {
@@ -155,7 +213,7 @@
     };
 
     ws.onopen = () => {
-      send({ type: 'join', name: state.name, role: state.role, channel: state.channel });
+      send(Object.assign({ type: 'join', ownerTokens: Object.values(ownerTokens()) }, state.joinReq));
     };
     ws.onmessage = async (ev) => {
       if (ws !== state.ws) return;
@@ -177,12 +235,38 @@
           break;
         case 'peers':
           state.peers = m.peers || [];
+          syncMe();
           updateUI();
           applyVolumes();
           break;
+        case 'me':
+          setMe(m.me);
+          break;
+        case 'channels':
+          state.channels = m.channels || [];
+          state.mode = m.mode;
+          requestRebuild();
+          break;
+        case 'mute':
+          // Il responsabile ha chiuso il mio microfono su questo canale.
+          state.latched.delete(m.channel);
+          state.held.delete(m.channel);
+          applyTalk();
+          banner('Il caporeparto ha chiuso il tuo microfono su ' + chName(m.channel) + '.', false);
+          break;
+        case 'ownerToken':
+          storeOwnerToken(m.channel, m.token);
+          banner('Sei stato nominato caporeparto di ' + chName(m.channel) + '.', false);
+          break;
+        case 'kicked':
+          backToJoin(m.error);
+          break;
         case 'error':
-          if (!state.me) backToJoin(m.error); // rifiutato all'ingresso: inutile riprovare
-          else banner(m.error, true);
+          if (!state.me) {
+            backToJoin(m.error); // rifiutato all'ingresso: inutile riprovare
+          } else {
+            banner(m.error, true);
+          }
           break;
       }
     };
@@ -193,19 +277,49 @@
     };
   }
 
+  function storeOwnerToken(channel, token) {
+    const t = ownerTokens();
+    t[channel] = token;
+    saveJSON('intercom.owner', t);
+  }
+
   function onWelcome(m) {
-    const prev = state.me && state.me.channels.join(',');
-    state.me = { id: m.id, role: m.me.role, channels: m.me.channels };
     if (m.channels) state.channels = m.channels;
+    if (m.mode) state.mode = m.mode;
+    if (m.token && m.channel) {
+      // Ho creato un canale: da ora in poi rientro direttamente lì.
+      storeOwnerToken(m.channel, m.token);
+      state.joinReq = { name: state.joinReq.name, channel: m.channel };
+      saveJSON('intercom.join', { channel: m.channel });
+    }
+    state.name = m.me.name;
+    setMe(Object.assign({ id: m.id }, m.me), true);
+    // Dopo una riconnessione il server riparte da zero: gli ripeto lo stato.
+    for (const c of state.listenOff) send({ type: 'listen', channel: c, on: false });
+    applyTalk(true);
+  }
+
+  function setMe(me, force) {
+    const key = (x) => x ? [x.role, (x.channels || []).join(','), (x.admin || []).join(',')].join('|') : '';
+    const prev = key(state.me);
+    state.me = Object.assign({}, state.me, me);
+    state.name = state.me.name || state.name;
     // Canali non più validi (es. evento cambiato): li tolgo dagli stati locali.
     for (const set of [state.latched, state.listenOff]) {
       for (const c of [...set]) if (!state.me.channels.includes(c)) set.delete(c);
     }
-    if (prev !== state.me.channels.join(',')) buildPanel();
-    // Dopo una riconnessione il server riparte da zero: gli ripeto lo stato.
-    for (const c of state.listenOff) send({ type: 'listen', channel: c, on: false });
-    applyTalk(true);
-    updateUI();
+    if (force || prev !== key(state.me)) requestRebuild();
+    else updateUI();
+  }
+
+  // Il mio stato come lo vede il server (es. microfono aperto dal caporeparto).
+  function syncMe() {
+    if (!state.me) return;
+    const mine = state.peers.find((p) => p.id === state.me.id);
+    if (!mine) return;
+    const forcedBefore = (state.me.forced || []).join(',');
+    state.me.forced = mine.forced || [];
+    if (forcedBefore !== state.me.forced.join(',')) applyTalk(true);
   }
 
   function send(m) {
@@ -295,16 +409,30 @@
         if (owner) now.add(owner);
       }
     }
-    if (state.talk.size && state.localLevel > 0.06 && state.me) now.add(state.me.id);
+    if (micOpen() && state.localLevel > 0.06 && state.me) now.add(state.me.id);
     const changed = now.size !== state.speaking.size || [...now].some((id) => !state.speaking.has(id));
     state.speaking = now;
     if (changed) updateUI();
   }, 160);
 
+  // ---------- Permessi del microfono ----------
+  const isAdminOf = (c) => !!state.me && (state.me.admin || []).includes(c);
+  const isForced = (c) => !!state.me && (state.me.forced || []).includes(c);
+  // Come posso usare il microfono su questo canale: 'libero', 'ptt' o 'admin' (solo il responsabile).
+  const myMicMode = (c) => (isAdminOf(c) ? 'libero' : chInfo(c).micMode || 'libero');
+  const micOpen = () => state.talk.size > 0 || (state.me && (state.me.forced || []).length > 0);
+
   // ---------- Pannello canali ----------
-  // Costruito una volta sola (i pulsanti non vanno ricreati mentre li si preme);
-  // updateUI aggiorna solo testi e colori.
+  // Costruito solo quando cambiano canali o permessi (i pulsanti non vanno
+  // ricreati mentre li si preme); updateUI aggiorna solo testi e colori.
+  function requestRebuild() {
+    if (presses.size) { state.rebuildPending = true; return; }
+    buildPanel();
+  }
+
   function buildPanel() {
+    state.rebuildPending = false;
+    if (!state.me) return;
     const list = $('channelList');
     const big = $('bigMicArea');
     list.textContent = '';
@@ -322,11 +450,21 @@
       head.className = 'chan-head';
       head.innerHTML = '<span class="chan-name"></span><span class="chan-who"></span>';
       head.querySelector('.chan-name').textContent = chName(id);
+      if (isAdminOf(id) && (!chInfo(id).main || state.me.role === 'regia')) {
+        const gear = document.createElement('button');
+        gear.className = 'gear';
+        gear.title = 'Gestisci il canale';
+        gear.textContent = '⚙';
+        gear.addEventListener('click', () => {
+          if (state.openAdmin.has(id)) state.openAdmin.delete(id); else state.openAdmin.add(id);
+          updateUI();
+        });
+        head.appendChild(gear);
+      }
       row.appendChild(head);
 
       const ctrl = document.createElement('div');
       ctrl.className = 'chan-ctrl';
-
       const listen = document.createElement('button');
       listen.className = 'listen';
       listen.title = 'Ascolto del canale';
@@ -352,15 +490,17 @@
         const ptt = document.createElement('button');
         ptt.className = 'ptt';
         ptt.dataset.chs = id;
-        ptt.innerHTML = '<span>PARLA</span>' + (isConsole && i < 9 ? `<kbd>${i + 1}</kbd>` : '');
+        ptt.innerHTML = '<span class="lbl">PARLA</span>' + (isConsole && i < 9 ? `<kbd>${i + 1}</kbd>` : '');
         bindTalk(ptt, [id]);
         ctrl.appendChild(ptt);
       }
       row.appendChild(ctrl);
+
+      if (isAdminOf(id)) row.appendChild(buildAdminPanel(id));
       list.appendChild(row);
     });
 
-    if (!multi) {
+    if (!multi && mine.length) {
       // Un solo canale: il grande pulsante rotondo.
       const btn = document.createElement('button');
       btn.className = 'mic';
@@ -370,7 +510,7 @@
       big.appendChild(btn);
       const hint = document.createElement('div');
       hint.className = 'hint';
-      hint.textContent = 'Tocca per aprire/chiudere · Tieni premuto per parlare';
+      hint.id = 'micHint';
       big.appendChild(hint);
     } else if (state.me.role === 'regia') {
       const all = document.createElement('button');
@@ -380,10 +520,45 @@
       bindTalk(all, mine);
       big.appendChild(all);
     }
+    updateUI();
+  }
+
+  // Pannello del responsabile: gestione del microfono degli utenti, video,
+  // apertura/chiusura del microfono dei singoli.
+  function buildAdminPanel(id) {
+    const box = document.createElement('div');
+    box.className = 'admin-panel';
+
+    const modeLbl = document.createElement('div');
+    modeLbl.className = 'small muted';
+    modeLbl.textContent = 'Microfono degli utenti';
+    box.appendChild(modeLbl);
+    const seg = document.createElement('div');
+    seg.className = 'seg small-seg';
+    for (const mode of ['libero', 'ptt', 'admin']) {
+      const b = document.createElement('button');
+      b.dataset.mode = mode;
+      b.textContent = micModeLabel[mode];
+      b.addEventListener('click', () => send({ type: 'channelSettings', channel: id, micMode: mode, video: !!chInfo(id).video }));
+      seg.appendChild(b);
+    }
+    box.appendChild(seg);
+
+    const video = document.createElement('label');
+    video.className = 'switch';
+    video.innerHTML = '<input type="checkbox"><span>Video della regia in questo canale</span>';
+    video.querySelector('input').addEventListener('change', (e) => {
+      send({ type: 'channelSettings', channel: id, micMode: chInfo(id).micMode, video: e.target.checked });
+    });
+    box.appendChild(video);
+
+    const users = document.createElement('ul');
+    users.className = 'members';
+    box.appendChild(users);
+    return box;
   }
 
   const micIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>';
-  const roleLabel = (r) => ({ regia: 'Regia', caporeparto: 'Caporeparto', tecnico: 'Tecnico' }[r] || r);
 
   function toggleListen(id) {
     const off = !state.listenOff.has(id);
@@ -404,33 +579,74 @@
     }
     document.querySelectorAll('#channelList .chan').forEach((row) => {
       const id = row.dataset.ch;
-      const talkers = byChannel.get(id) || [];
-      const others = talkers.filter((p) => p.id !== state.me.id);
-      const who = row.querySelector('.chan-who');
-      who.textContent = others.length ? others.map((p) => p.name).join(', ') : '';
+      const others = (byChannel.get(id) || []).filter((p) => p.id !== state.me.id);
+      row.querySelector('.chan-who').textContent = others.map((p) => p.name).join(', ');
       row.classList.toggle('busy', others.length > 0);
       row.classList.toggle('voice', others.some((p) => state.speaking.has(p.id)));
-      row.classList.toggle('mine', state.talk.has(id));
+      row.classList.toggle('mine', state.talk.has(id) || isForced(id));
       row.classList.toggle('off', state.listenOff.has(id));
       const listen = row.querySelector('.listen');
       listen.textContent = state.listenOff.has(id) ? '🔇' : '🔊';
       listen.setAttribute('aria-pressed', String(!state.listenOff.has(id)));
+      const panel = row.querySelector('.admin-panel');
+      if (panel) updateAdminPanel(panel, id);
     });
     document.querySelectorAll('[data-chs]').forEach((btn) => {
       const chs = btn.dataset.chs.split(',');
-      const on = chs.every((c) => state.talk.has(c));
+      const forced = chs.every(isForced);
+      const on = chs.every((c) => state.talk.has(c) || isForced(c));
+      const locked = chs.every((c) => myMicMode(c) === 'admin');
       btn.classList.toggle('on', on);
+      btn.classList.toggle('locked', locked && !on);
       btn.setAttribute('aria-pressed', String(on));
       const lbl = btn.querySelector('.lbl');
-      if (lbl) lbl.textContent = on ? 'IN ONDA' : 'MUTO';
+      if (lbl) {
+        const big = btn.classList.contains('mic');
+        lbl.textContent = forced ? 'APERTO DAL CAPOREPARTO' : on ? 'IN ONDA' : locked ? 'GESTITO DAL CAPO' : big ? 'MUTO' : 'PARLA';
+      }
     });
+    const hint = $('micHint');
+    if (hint && state.me.channels.length === 1) {
+      hint.textContent = { libero: 'Tocca per aprire/chiudere · Tieni premuto per parlare', ptt: 'Tieni premuto per parlare', admin: 'Il microfono lo apre il caporeparto' }[myMicMode(state.me.channels[0])];
+    }
     renderPeers();
+  }
+
+  function updateAdminPanel(panel, id) {
+    panel.classList.toggle('hidden', !state.openAdmin.has(id));
+    const info = chInfo(id);
+    panel.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('sel', b.dataset.mode === info.micMode));
+    const vid = panel.querySelector('.switch input');
+    if (vid) vid.checked = !!info.video;
+    const ul = panel.querySelector('.members');
+    ul.textContent = '';
+    const members = state.peers.filter((p) => p.id !== state.me.id && (p.channels || []).includes(id) && (!(p.admin || []).includes(id) || state.me.role === 'regia') && p.role !== 'regia');
+    if (!members.length) {
+      const li = document.createElement('li');
+      li.className = 'muted small';
+      li.textContent = 'Nessun utente collegato a questo canale.';
+      ul.appendChild(li);
+    }
+    for (const p of members) {
+      const li = document.createElement('li');
+      const open = (p.talk || []).includes(id);
+      const name = document.createElement('span');
+      name.textContent = p.name;
+      name.className = 'name' + (state.speaking.has(p.id) ? ' talking' : '');
+      const b = document.createElement('button');
+      b.className = 'mini ' + (open ? 'danger' : '');
+      b.textContent = open ? 'Chiudi mic' : 'Apri mic';
+      b.addEventListener('click', () => send({ type: 'control', peer: p.id, channel: id, on: !open }));
+      li.append(name, b);
+      ul.appendChild(li);
+    }
   }
 
   function renderPeers() {
     const ul = $('peerList');
     ul.textContent = '';
     $('peerCount').textContent = String(state.peers.length);
+    const regia = state.me.role === 'regia';
     for (const p of state.peers) {
       const li = document.createElement('li');
       if (state.speaking.has(p.id)) li.classList.add('speaking');
@@ -450,6 +666,24 @@
         b.textContent = chName(c);
         li.appendChild(b);
       }
+      if (regia && p.id !== state.me.id) {
+        if (state.mode === 'libero' && p.role === 'tecnico') {
+          const sub = (p.channels || []).find((c) => !chInfo(c).main);
+          if (sub) {
+            const pr = document.createElement('button');
+            pr.className = 'mini';
+            pr.textContent = 'Nomina caporeparto';
+            pr.title = 'Diventa caporeparto di ' + chName(sub);
+            pr.addEventListener('click', () => send({ type: 'promote', peer: p.id, channel: sub }));
+            li.appendChild(pr);
+          }
+        }
+        const k = document.createElement('button');
+        k.className = 'mini danger';
+        k.textContent = 'Scollega';
+        k.addEventListener('click', () => { if (confirm('Scollegare ' + p.name + '?')) send({ type: 'kick', peer: p.id }); });
+        li.appendChild(k);
+      }
       ul.appendChild(li);
     }
   }
@@ -457,8 +691,14 @@
   // ---------- Parla: tocco = apri/chiudi, pressione lunga = parla finché tieni ----------
   const presses = new Map(); // chiave pressione -> { at, chs, wasOn }
 
-  function pressStart(key, chs) {
+  function pressStart(key, allChs) {
     if (presses.has(key)) return;
+    // Solo i canali dove posso aprirmi il microfono da solo.
+    const chs = allChs.filter((c) => myMicMode(c) !== 'admin');
+    if (!chs.length) {
+      if (navigator.vibrate) navigator.vibrate([30, 60, 30]);
+      return;
+    }
     const wasOn = chs.every((c) => state.latched.has(c) || (state.held.get(c) || 0) > 0);
     presses.set(key, { at: performance.now(), chs, wasOn });
     for (const c of chs) state.held.set(c, (state.held.get(c) || 0) + 1);
@@ -472,12 +712,12 @@
     presses.delete(key);
     for (const c of p.chs) state.held.set(c, Math.max(0, (state.held.get(c) || 0) - 1));
     const tap = performance.now() - p.at <= HOLD_MS;
-    if (p.wasOn) {
-      // era aperto: qualsiasi pressione lo chiude (già tolto da latched)
-    } else if (tap) {
-      for (const c of p.chs) state.latched.add(c); // tocco breve: resta aperto
+    if (!p.wasOn && tap) {
+      // Tocco breve: resta aperto, ma solo dove è permesso (non in "solo push-to-talk").
+      for (const c of p.chs) if (myMicMode(c) === 'libero') state.latched.add(c);
     }
     applyTalk();
+    if (!presses.size && state.rebuildPending) buildPanel();
   }
 
   // wasOn + pressione: il canale va chiuso, ma mentre si tiene premuto
@@ -492,12 +732,12 @@
     for (const c of state.latched) next.add(c);
     for (const [c, n] of state.held) if (n > 0 && !closingByPress(c)) next.add(c);
     const same = next.size === state.talk.size && [...next].every((c) => state.talk.has(c));
-    if (same && !force) return;
-    const wasTalking = state.talk.size > 0;
+    const wasOpen = micOpen();
     state.talk = next;
-    for (const t of micTracks()) t.enabled = next.size > 0;
+    for (const t of micTracks()) t.enabled = micOpen();
+    if (same && !force) return;
     send({ type: 'talk', channels: [...next] });
-    if (!force && navigator.vibrate && wasTalking !== next.size > 0) navigator.vibrate(next.size ? 25 : [10, 40, 10]);
+    if (!force && navigator.vibrate && wasOpen !== micOpen()) navigator.vibrate(micOpen() ? 25 : [10, 40, 10]);
     updateUI();
   }
 
@@ -518,7 +758,7 @@
   // Tastiera in console: 1–9 canali, Spazio = tutti.
   if (isConsole) {
     const keyChannels = (e) => {
-      if (!state.me || e.target.tagName === 'INPUT') return null;
+      if (!state.me || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return null;
       const mine = state.me.channels;
       if (e.code === 'Space') return mine;
       const m = /^(Digit|Numpad)([1-9])$/.exec(e.code);
@@ -558,7 +798,7 @@
         let sum = 0;
         for (const v of buf) sum += v * v;
         const level = Math.min(1, Math.sqrt(sum / buf.length) * 4);
-        state.localLevel = state.talk.size ? level : 0;
+        state.localLevel = micOpen() ? level : 0;
         document.querySelectorAll('.mic, .ptt').forEach((b) => b.style.setProperty('--level', b.classList.contains('on') ? state.localLevel.toFixed(3) : '0'));
         requestAnimationFrame(tick);
       };
@@ -611,7 +851,7 @@
       state.nsChain = null;
       setTimeout(() => old.ctx.close().catch(() => {}), 500);
     }
-    for (const t of micTracks()) t.enabled = state.talk.size > 0;
+    for (const t of micTracks()) t.enabled = micOpen();
     if (state.sender) await state.sender.replaceTrack(sendTrack()).catch(() => {});
     return true;
   }
@@ -629,14 +869,18 @@
   function setConn(kind, text) {
     $('connDot').className = 'dot' + (kind === 'ok' ? ' ok' : kind === 'bad' ? ' bad' : '');
     $('connText').textContent = text;
-    if (kind === 'ok') hideBanner();
+    if (kind === 'ok' && $('talkBanner').dataset.sticky !== '1') hideBanner();
   }
+  let bannerTimer = null;
   function banner(text, isError, tapToPlay) {
     const b = $('talkBanner');
     b.textContent = text;
     b.classList.toggle('error', !!isError);
     b.classList.remove('hidden');
-    b.onclick = tapToPlay ? () => { state.audioEls.forEach((el) => el.play().catch(() => {})); hideBanner(); } : null;
+    b.dataset.sticky = tapToPlay ? '1' : '';
+    b.onclick = tapToPlay ? () => { state.audioEls.forEach((el) => el.play().catch(() => {})); hideBanner(); } : hideBanner;
+    clearTimeout(bannerTimer);
+    if (!tapToPlay) bannerTimer = setTimeout(hideBanner, 6000);
   }
-  function hideBanner() { $('talkBanner').classList.add('hidden'); }
+  function hideBanner() { const b = $('talkBanner'); b.classList.add('hidden'); b.dataset.sticky = ''; }
 })();

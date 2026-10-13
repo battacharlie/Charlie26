@@ -13,22 +13,42 @@
   <div class="app" id="app">
     <!-- Schermata di ingresso -->
     <section class="join" id="joinView">
-      <h1>Intercom di produzione</h1>
-      <p class="muted">Scegli il tuo canale e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
-      <label class="field">Il tuo nome
-        <input type="text" id="nameInput" placeholder="es. Marco – Cam 2" autocomplete="nickname" maxlength="24">
-      </label>
-      <label class="field">Canale
-        <select id="channelInput"></select>
-      </label>
-      <div class="field" id="roleField">
-        <span>Ruolo</span>
-        <div class="seg">
-          <label><input type="radio" name="role" value="tecnico" checked><span>Tecnico</span></label>
-          <label><input type="radio" name="role" value="caporeparto"><span>Caporeparto</span></label>
+      <h1 id="eventTitle">Intercom di produzione</h1>
+
+      <!-- Libero accesso -->
+      <div id="freeForm" class="hidden">
+        <p class="muted">Scegli il tuo canale e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
+        <label class="field">Il tuo nome
+          <input type="text" id="nameInput" placeholder="es. Marco – Cam 2" autocomplete="nickname" maxlength="24">
+        </label>
+        <label class="field">Canale
+          <select id="channelInput"></select>
+        </label>
+        <label class="field hidden" id="passwordField">Password del canale
+          <input type="password" id="passwordInput" autocomplete="off">
+        </label>
+        <div id="createFields" class="hidden">
+          <label class="field">Nome del nuovo canale
+            <input type="text" id="createName" maxlength="24" placeholder="es. Palco">
+          </label>
+          <label class="field">Password per entrare (facoltativa)
+            <input type="password" id="createPassword" autocomplete="new-password">
+          </label>
+          <p class="muted small">Chi crea il canale ne diventa il <b>caporeparto</b>: parla anche nel canale principale e gestisce i microfoni del suo canale.</p>
         </div>
-        <small class="muted" id="roleHint">Il caporeparto parla anche nel canale principale.</small>
       </div>
+
+      <!-- Accesso con credenziali -->
+      <div id="loginForm" class="hidden">
+        <p class="muted">Accedi con il nome utente e la password che ti ha dato la regia.</p>
+        <label class="field">Nome utente
+          <input type="text" id="userInput" autocomplete="username" autocapitalize="off" autocorrect="off">
+        </label>
+        <label class="field">Password
+          <input type="password" id="userPassword" autocomplete="current-password">
+        </label>
+      </div>
+
       <button class="btn" id="joinBtn">Entra</button>
       <div class="banner error hidden" id="joinError"></div>
     </section>
@@ -39,6 +59,7 @@
         <span class="dot" id="connDot"></span>
         <span class="me" id="meLabel"></span>
         <span class="status" id="connText">connessione…</span>
+        <button class="exit" id="exitBtn" title="Esci">Esci</button>
       </div>
       <div class="banner hidden" id="talkBanner"></div>
       <div class="channels" id="channelList"></div>

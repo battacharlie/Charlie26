@@ -12,7 +12,7 @@
     <aside>
       <div class="card">
         <h1>Console di regia</h1>
-        <p class="muted" style="margin-top:0">Fase 2 · canali intercom</p>
+        <p class="muted" style="margin-top:0">Fase 3 · ruoli e accessi</p>
         <h2>QR per i tecnici</h2>
         <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
         <p class="url">{{APP_URL}}</p>
@@ -54,10 +54,17 @@
         </section>
       </div>
     </main>
+
+    <section class="card config" id="config">
+      <h1>Configurazione evento</h1>
+      <div class="banner hidden" id="configMsg"></div>
+      <div id="configBody"></div>
+    </section>
   </div>
   <script>
     if ('{{CERT_MODE}}' !== 'locale') document.getElementById('helpBox').style.display = 'none';
   </script>
   <script src="/static/app.js"></script>
+  <script src="/static/admin.js"></script>
 </body>
 </html>

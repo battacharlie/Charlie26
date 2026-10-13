@@ -10,42 +10,7 @@ func peer(member, talk, muted []string) *Peer {
 		}
 		return m
 	}
-	return &Peer{member: set(member), talk: set(talk), muted: set(muted)}
-}
-
-func TestMembershipByRole(t *testing.T) {
-	r := &Room{channels: DefaultChannels()}
-	cases := []struct {
-		role, ch string
-		want     []string
-	}{
-		{RoleRegia, "", []string{"produzione", "video", "audio", "luci"}},
-		{RoleCaporeparto, "video", []string{"produzione", "video"}},
-		{RoleTecnico, "luci", []string{"luci"}},
-		{RoleTecnico, "", []string{"produzione"}},
-		{RoleCaporeparto, "produzione", []string{"produzione"}},
-	}
-	for _, c := range cases {
-		m, err := r.membershipLocked(c.role, c.ch)
-		if err != nil {
-			t.Fatalf("%s/%s: %v", c.role, c.ch, err)
-		}
-		got := r.orderedLocked(m)
-		if len(got) != len(c.want) {
-			t.Fatalf("%s/%s: %v, attesi %v", c.role, c.ch, got, c.want)
-		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Fatalf("%s/%s: %v, attesi %v", c.role, c.ch, got, c.want)
-			}
-		}
-	}
-	if _, err := r.membershipLocked(RoleTecnico, "cucina"); err == nil {
-		t.Fatal("un canale inesistente deve dare errore")
-	}
-	if _, err := r.membershipLocked("hacker", "video"); err == nil {
-		t.Fatal("un ruolo sconosciuto deve dare errore")
-	}
+	return &Peer{member: set(member), talk: set(talk), muted: set(muted), forced: map[string]bool{}}
 }
 
 // Lo scenario tipico di un evento, verificato coppia per coppia.
@@ -100,25 +65,5 @@ func TestSubscribedNeedsSharedChannel(t *testing.T) {
 	}
 	if !subscribed(cam, capo) || !subscribed(capo, cam) {
 		t.Error("capo e cameraman condividono il canale video")
-	}
-}
-
-func TestChannelsFromNames(t *testing.T) {
-	chs := ChannelsFromNames("Regia", []string{"Video", " Luci ", "", "Città", "Video"})
-	ids := []string{}
-	for _, c := range chs {
-		ids = append(ids, c.ID)
-	}
-	want := []string{"produzione", "video", "luci", "citta", "video-2"}
-	if len(ids) != len(want) {
-		t.Fatalf("%v", ids)
-	}
-	for i := range want {
-		if ids[i] != want[i] {
-			t.Fatalf("%v, attesi %v", ids, want)
-		}
-	}
-	if chs[0].Name != "Regia" || !chs[0].Main {
-		t.Fatalf("canale principale errato: %+v", chs[0])
 	}
 }

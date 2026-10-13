@@ -24,11 +24,11 @@ h2 { font-size: 1.05rem; margin: 1.2rem 0 .5rem; }
 .muted { color: var(--muted); }
 .hidden { display: none !important; }
 
-button, input {
+button, input, select {
   font: inherit;
   color: inherit;
 }
-input[type=text], select {
+input[type=text], input[type=password], select {
   width: 100%;
   padding: .9rem 1rem;
   border-radius: var(--radius);
@@ -211,3 +211,43 @@ body:not([data-role=regia]) .talk .mic-area { order: 4; margin-top: 0; }
 .switch input { width: 22px; height: 22px; accent-color: var(--talk); }
 .switch small { grid-column: 2; font-size: .8rem; }
 body:not([data-role=regia]) .talk .switch { order: 3; }
+
+/* ---------- Fase 3: permessi ---------- */
+.small { font-size: .85rem; }
+.exit { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: .25rem .6rem; font-size: .8rem; cursor: pointer; }
+.gear { margin-left: auto; background: #22262d; border: 1px solid var(--line); color: var(--text); border-radius: 8px; width: 36px; height: 32px; font-size: 1.05rem; cursor: pointer; flex: none; }
+.chan-head .chan-who { order: 1; }
+.chan-head .gear { order: 2; margin-left: .4rem; }
+.admin-panel { margin-top: .7rem; padding-top: .7rem; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: .5rem; }
+.small-seg button {
+  flex: 1; padding: .55rem .3rem; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); font-size: .8rem; cursor: pointer;
+}
+.small-seg button.sel { border-color: #2f6fed; background: #16264a; }
+.members { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; }
+.members li { display: flex; align-items: center; gap: .5rem; }
+.members .name { flex: 1; }
+.members .name.talking { color: var(--talk); font-weight: 700; }
+.mini { border: 1px solid var(--line); background: #22262d; color: var(--text); border-radius: 8px; padding: .4rem .7rem; font-size: .8rem; cursor: pointer; }
+.mini.danger { border-color: #6b2622; background: #3a1414; color: #ffb4b0; }
+.mini.primary { border-color: #2f6fed; background: #16264a; }
+.ptt.locked, .mic.locked { opacity: .45; }
+.peers li .mini { margin-left: .3rem; }
+
+/* Console: configurazione evento */
+.config { grid-column: 1 / -1; }
+.config h2 { margin-top: 1.4rem; }
+.config table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.config th { text-align: left; color: var(--muted); font-weight: 500; padding: .4rem; border-bottom: 1px solid var(--line); }
+.config td { padding: .35rem .4rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.config input[type=text], .config input[type=password], .config select { padding: .45rem .6rem; font-size: .9rem; border-radius: 8px; }
+.config .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .5rem 0; }
+.config .row input[type=text], .config .row input[type=password] { width: auto; flex: 1; min-width: 140px; }
+.config .chips { display: flex; flex-wrap: wrap; gap: .3rem .7rem; }
+.config .chips label { display: inline-flex; align-items: center; gap: .25rem; white-space: nowrap; }
+.config .modes { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.config .modes label { display: block; padding: .8rem; border-radius: 12px; border: 1px solid var(--line); background: #13161a; cursor: pointer; }
+.config .modes input { margin-right: .4rem; }
+.config .modes label.sel { border-color: #2f6fed; background: #16264a; }
+.config .scroll { overflow-x: auto; }
+@media (max-width: 760px) { .config .modes { grid-template-columns: 1fr; } }

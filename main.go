@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/battacharlie/charlie26/internal/certs"
+	"github.com/battacharlie/charlie26/internal/evento"
 	"github.com/battacharlie/charlie26/internal/netinfo"
 	"github.com/battacharlie/charlie26/internal/server"
 	"github.com/battacharlie/charlie26/internal/sfu"
@@ -40,8 +41,8 @@ func main() {
 		certFile  = flag.String("cert", "", "certificato del tuo dominio (opzione B), file .crt/.pem con la catena completa")
 		keyFile   = flag.String("key", "", "chiave privata del certificato di dominio")
 		domain    = flag.String("dominio", "", "dominio per l'opzione B, es. intercom.esempio.it: i QR useranno 192-168-1-10.intercom.esempio.it")
-		mainName  = flag.String("principale", "Produzione", "nome del canale principale")
-		depts     = flag.String("canali", "Video,Audio,Luci", "reparti separati da virgola")
+		mainName  = flag.String("principale", "Produzione", "nome del canale principale (solo per un evento nuovo)")
+		depts     = flag.String("canali", "Video,Audio,Luci", "reparti separati da virgola (solo per un evento nuovo)")
 		noBrowser = flag.Bool("no-browser", false, "non aprire automaticamente la console nel browser")
 	)
 	flag.Parse()
@@ -116,8 +117,24 @@ func main() {
 		fmt.Println("  HTTPS: CA locale (cartella " + certDir + ")")
 	}
 
-	channels := sfu.ChannelsFromNames(*mainName, strings.Split(*depts, ","))
-	room, err := sfu.NewRoom(sfu.Config{UDPPort: *udpPort, Channels: channels})
+	// Evento: si riparte da quello salvato, altrimenti se ne crea uno nuovo.
+	eventPath := filepath.Join(*dataDir, "evento.json")
+	ev, err := evento.Load(eventPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("  ⚠ %v: ne creo uno nuovo (il vecchio resta in evento.json.rotto)\n", err)
+			_ = os.Rename(eventPath, eventPath+".rotto")
+		}
+		ev = evento.New(*mainName, strings.Split(*depts, ","))
+		if err := ev.Save(eventPath); err != nil {
+			fatal("impossibile salvare l'evento in %s: %v", eventPath, err)
+		}
+	}
+	room, err := sfu.NewRoom(sfu.Config{
+		UDPPort: *udpPort,
+		Event:   ev,
+		Save:    func(e *evento.Event) error { return e.Save(eventPath) },
+	})
 	if err != nil {
 		fatal("%v\n  Un altro programma (o un'altra copia di questo) usa già la porta. Prova con -porta-udp 8500.", err)
 	}
@@ -166,11 +183,12 @@ func main() {
 		fmt.Println("  Aiuto certificato: " + srv.HelpURL())
 	}
 	fmt.Printf("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
-	names := make([]string, len(channels))
-	for i, c := range channels {
+	names := make([]string, len(ev.Channels))
+	for i, c := range ev.Channels {
 		names[i] = c.Name
 	}
-	fmt.Println("  Canali: " + strings.Join(names, ", "))
+	mode := map[string]string{evento.ModeLibero: "libero accesso", evento.ModeCredenziali: "accesso con credenziali"}[ev.Mode]
+	fmt.Printf("  Evento %q, %s. Canali: %s\n", ev.Name, mode, strings.Join(names, ", "))
 	fmt.Println()
 	fmt.Println("  Se Windows chiede di consentire l'accesso alla rete, scegli")
 	fmt.Println("  \"Reti private\" e premi Consenti. Chiudi questa finestra per spegnere.")
