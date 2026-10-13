@@ -6,6 +6,8 @@ import (
 	"os/exec"
 
 	"fyne.io/systray"
+
+	"github.com/battacharlie/charlie26/internal/icona"
 	"golang.org/x/sys/windows"
 )
 
@@ -22,7 +24,7 @@ func showError(msg string) {
 
 func runDesktop(d desktop) {
 	systray.Run(func() {
-		systray.SetIcon(iconICO(32))
+		systray.SetIcon(icona.ICO(32))
 		systray.SetTitle("Intercom regia")
 		systray.SetTooltip("Intercom regia – tecnici: " + d.appURL)
 		openConsole := systray.AddMenuItem("Apri console di regia", "Apre la console nel browser")

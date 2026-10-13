@@ -2,7 +2,7 @@
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
-> **Stato: Fase 5**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), **video** (dalla regia, da OBS e dai telefoni, con consenso e qualità selezionabile), avatar, riduzione rumore forte.
+> **Stato: Fase 7**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), **video** (dalla regia, da OBS e dai telefoni, con consenso e qualità selezionabile), avatar, riduzione rumore forte.
 
 ## Come funziona
 
@@ -16,9 +16,44 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 - Le pagine sono in **HTTPS**, perché senza HTTPS i browser bloccano il microfono.
 - Tutto il traffico audio passa da **una sola porta UDP** (predefinita 8443).
 
+## Guida rapida per l'evento
+
+**Prima (a casa o in ufficio)**
+1. Avvia il programma e prepara l'evento dalla console: modalità di accesso, canali, utenti, sfondi. Salvalo come **modello** (scheda *Evento*) o **esportalo** su file.
+2. Con le credenziali: scheda **QR → Stampa / salva PDF**, e ritaglia i QR personali.
+3. Se usi OBS: copia in OBS indirizzo e chiave della scheda *Video* (servizio WHIP).
+
+**In regia, all'arrivo**
+1. Collega il PC alla rete dell'evento (meglio via cavo) e avvia `intercom`.
+2. Controlla in console la **rete usata nei QR** (colonna sinistra): deve essere quella su cui stanno i telefoni.
+3. Carica il modello dell'evento, se l'hai preparato.
+4. Apri il **pannello intercom** (in basso) e prova un tasto PARLA.
+5. Fai inquadrare il QR a un tecnico e fate una prova voce nei due sensi. Se il telefono dice "connessione non privata", usate il **QR di aiuto**.
+
+**Durante**
+- **PARLA A TUTTI** con la barra Spazio, i singoli canali con i tasti 1–9.
+- Richieste video: compaiono nelle anteprime con **Approva / Rifiuta**.
+- Se un telefono perde la connessione si ricollega da solo. Se resta grigio, ricaricare la pagina.
+- Scheda **Registro** per capire cosa succede.
+
+**Dopo**
+- *Evento → Spegni il programma* (o, su Windows, l'icona vicino all'orologio → *Esci*).
+- Se l'evento si ripete, salva il modello aggiornato.
+
+**Se qualcosa non va**
+| Problema | Cosa fare |
+|---|---|
+| Il telefono non apre la pagina | stessa rete del PC? Rete giusta scelta nei QR? Su Windows, al primo avvio, hai consentito le **Reti private**? |
+| "Connessione non privata" | Android: *Avanzate → Procedi*; iPhone: *Mostra dettagli → visita questo sito web*. Definitivo: QR di aiuto, installa il certificato |
+| Il microfono non parte | il browser deve avere il permesso: rispondi *Consenti*. iPhone: *Impostazioni › Safari › Microfono* |
+| Si sente a scatti | troppi video in qualità alta sulla stessa rete Wi-Fi: passare a *Bassa* |
+| Il programma non si avvia | leggi la finestrella di errore; di solito una porta è occupata da un'altra copia o da un altro programma |
+
 ## Scaricare il programma
 
-Su GitHub apri **Actions → Compila**, poi l'esecuzione più recente, e in fondo scarica **intercom**. Dentro trovi:
+**Versioni ufficiali**: nella pagina del progetto su GitHub, sezione **Releases** (a destra), scarica il file per il tuo sistema. Ogni release contiene anche `SHA256SUMS.txt` per verificare i file.
+
+**Ultima versione in sviluppo**: **Actions → Compila**, l'esecuzione più recente, in fondo **intercom**. Dentro trovi:
 
 | File | Per |
 |---|---|
@@ -159,9 +194,12 @@ In alternativa copia i file come `dominio.crt` e `dominio.key` nella cartella `c
 ## Per sviluppatori
 
 ```
-go test -race ./...     # test automatici (inclusi due "telefoni" simulati)
-go run .                # avvia in locale
+go test -race ./...                 # test automatici (inclusi "telefoni" simulati)
+go run .                            # avvia in locale
+go run ./tools/winres -version 1.0.0  # icona e versione per l'eseguibile Windows
 ```
+
+**Pubblicare una release**: su GitHub *Releases → Draft a new release*, crea un tag `vX.Y.Z` (es. `v1.0.0`) e pubblica. La compilazione automatica allega da sola i file per Windows e Mac.
 
 ## Licenze di terze parti
 

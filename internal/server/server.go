@@ -46,6 +46,8 @@ type Config struct {
 	ModelsDir string
 	// Images è l'archivio delle immagini caricate (sfondi, icone).
 	Images immagini.Store
+	// Version è la versione del programma (mostrata in console).
+	Version string
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
@@ -168,6 +170,7 @@ func (s *Server) page(name string) http.HandlerFunc {
 			"{{APP_URL}}", s.AppURL(),
 			"{{HELP_URL}}", s.HelpURL(),
 			"{{CERT_MODE}}", s.cfg.CertMode,
+			"{{VERSION}}", s.cfg.Version,
 		).Replace(string(b))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")

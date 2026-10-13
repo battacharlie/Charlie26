@@ -23,7 +23,15 @@ jobs:
       - name: Compila Windows e macOS
         run: |
           mkdir -p dist
-          VERSION="${GITHUB_REF_NAME}-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            NUM="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
+            NUM="0.0.0"
+          fi
+          # Icona e informazioni di versione dell'eseguibile Windows.
+          go run ./tools/winres -version "$NUM"
           for t in windows/amd64 darwin/arm64 darwin/amd64; do
             os=${t%/*}; arch=${t#*/}; ext=""; gui=""
             # Windows: niente finestra nera, il programma vive come icona vicino all'orologio.
@@ -32,6 +40,8 @@ jobs:
               -ldflags "-s -w $gui -X main.version=$VERSION" \
               -o "dist/intercom-$os-$arch$ext" .
           done
+          rm -f rsrc_windows_amd64.syso
+          (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
@@ -42,3 +52,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body: |
+            ## Scarica
+            | File | Per |
+            |---|---|
+            | `intercom-windows-amd64.exe` | Windows 10/11 |
+            | `intercom-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
+            | `intercom-darwin-amd64` | Mac con processore Intel |
+
+            **Windows**: doppio clic. Se compare "Windows ha protetto il PC": *Ulteriori informazioni → Esegui comunque*. Al primo avvio consenti l'accesso alle **Reti private**. Il programma resta come icona vicino all'orologio.
+
+            **Mac** (file non firmati da Apple), nel Terminale:
+            ```
+            chmod +x intercom-darwin-arm64
+            xattr -d com.apple.quarantine intercom-darwin-arm64
+            ./intercom-darwin-arm64
+            ```
+
+            Istruzioni complete e guida per l'evento nel [README](https://github.com/${{ github.repository }}#readme).

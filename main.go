@@ -194,6 +194,7 @@ func main() {
 		DetectIPs: netinfo.Detect,
 		ModelsDir: filepath.Join(*dataDir, "modelli"),
 		Images:    immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
+		Version:   version,
 		ChangeIP: func(ip string) (string, error) {
 			newHost := ip
 			if certMode == "dominio" {
