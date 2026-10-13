@@ -332,6 +332,7 @@
     state.joined = true;
     connect();
     keepScreenOn();
+    if (pipSupported()) pipSetup();
   }
 
   function showJoinError(html) {
@@ -342,6 +343,7 @@
 
   function backToJoin(message) {
     state.joined = false;
+    if (document.pictureInPictureElement && document.exitPictureInPicture) document.exitPictureInPicture().catch(() => {});
     state.me = null;
     clearTimeout(state.retryTimer);
     teardown();
@@ -927,6 +929,7 @@
     }
     const wasOn = chs.every((c) => state.latched.has(c) || (state.held.get(c) || 0) > 0);
     presses.set(key, { at: performance.now(), chs, wasOn });
+    pip.lastChs = chs;
     for (const c of chs) state.held.set(c, (state.held.get(c) || 0) + 1);
     if (wasOn) for (const c of chs) state.latched.delete(c);
     applyTalk();
@@ -1543,6 +1546,175 @@
     document.body.appendChild(ov);
   }
   window.intercomLook = { open: openLookDialog };
+
+  // ---------- Pop-up (Picture-in-Picture) ----------
+  // Uscendo dal browser resta una finestrella sopra le altre app: mostra il
+  // video ricevuto (se c'è) oppure un riquadro con canale, stato del
+  // microfono e chi parla. I tasti ▶/⏸ della finestrella aprono e chiudono il
+  // microfono (nel pop-up non si può tenere premuto: è sempre un tocco).
+  const pip = { video: null, canvas: null, ctx: null, logo: null, timer: null, src: null, lastChs: null };
+  const pipSupported = () => !!(document.pictureInPictureEnabled || (HTMLVideoElement.prototype.webkitSupportsPresentationMode && HTMLVideoElement.prototype.webkitSupportsPresentationMode('picture-in-picture')));
+  const pipActive = () => !!(document.pictureInPictureElement || (pip.video && pip.video.webkitPresentationMode === 'picture-in-picture'));
+
+  // Canali che il pop-up apre: gli ultimi usati, altrimenti il primo dove posso parlare da solo.
+  function pipChannels() {
+    if (!state.me) return [];
+    const mine = state.me.channels;
+    const last = (pip.lastChs || []).filter((c) => mine.includes(c));
+    const pool = last.length ? last : mine.filter((c) => myMicMode(c) !== 'admin').slice(0, 1);
+    return pool.filter((c) => myMicMode(c) === 'libero');
+  }
+
+  function pipToggleMic(on) {
+    if (!state.me) return;
+    const want = on === undefined ? !micOpen() : on;
+    if (!want) {
+      state.latched.clear();
+    } else {
+      const chs = pipChannels();
+      if (!chs.length) { pipDraw('Qui il microfono si usa solo tenendo premuto: torna nell\'app'); return; }
+      for (const c of chs) state.latched.add(c);
+    }
+    applyTalk();
+    pipRefresh();
+  }
+
+  function pipSetup() {
+    if (pip.video) return;
+    pip.canvas = document.createElement('canvas');
+    pip.canvas.width = 640;
+    pip.canvas.height = 360;
+    pip.ctx = pip.canvas.getContext('2d');
+    pip.logo = new Image();
+    pip.logo.src = '/static/brand/icon-192.png';
+    pip.canvasStream = pip.canvas.captureStream ? pip.canvas.captureStream(5) : null;
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute('playsinline', '');
+    v.autoPictureInPicture = true; // Safari: pop-up automatico uscendo dall'app
+    v.setAttribute('autopictureinpicture', '');
+    v.className = 'pip-src';
+    document.body.appendChild(v);
+    pip.video = v;
+    v.addEventListener('leavepictureinpicture', pipRefresh);
+    v.addEventListener('enterpictureinpicture', pipRefresh);
+    // I tasti della finestrella: ▶ = parla, ⏸ = muto.
+    if ('mediaSession' in navigator) {
+      const ms = navigator.mediaSession;
+      const set = (a, fn) => { try { ms.setActionHandler(a, fn); } catch (_) {} };
+      set('play', () => pipToggleMic(true));
+      set('pause', () => pipToggleMic(false));
+      set('togglemicrophone', () => pipToggleMic());
+      set('hangup', () => { if (document.exitPictureInPicture && document.pictureInPictureElement) document.exitPictureInPicture(); });
+      // Chrome per computer: pop-up automatico cambiando scheda o app.
+      set('enterpictureinpicture', () => pipOpen().catch(() => {}));
+    }
+    clearInterval(pip.timer);
+    pip.timer = setInterval(pipRefresh, 400);
+  }
+
+  // Sorgente del pop-up: il primo video ricevuto, altrimenti il riquadro disegnato.
+  function pipSource() {
+    for (const v of video.list) {
+      const st = video.remote.get(v.id);
+      if (st && st.getVideoTracks().some((t) => t.readyState === 'live')) return st;
+    }
+    return pip.canvasStream;
+  }
+
+  function pipRefresh() {
+    if (!pip.video || !state.joined) return;
+    const src = pipSource();
+    if (src && pip.video.srcObject !== src) {
+      pip.video.srcObject = src;
+      pip.video.play().catch(() => {});
+    }
+    if (src === pip.canvasStream) pipDraw();
+    const on = micOpen();
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
+        if (navigator.mediaSession.setMicrophoneActive) navigator.mediaSession.setMicrophoneActive(on);
+        const who = [...state.speaking].filter((id) => !state.me || id !== state.me.id).map((id) => (state.peers.find((p) => p.id === id) || {}).name).filter(Boolean);
+        const meta = { title: on ? '● IN ONDA · ' + [...state.talk].map(chName).join(', ') : 'MUTO · ▶ per parlare', artist: who.length ? 'Parla: ' + who.join(', ') : 'CHARLIE26 – Intercom Evoluto', artwork: [{ src: '/static/brand/icon-512.png', sizes: '512x512', type: 'image/png' }] };
+        if (window.MediaMetadata && (!pip.meta || pip.meta.title !== meta.title || pip.meta.artist !== meta.artist)) {
+          navigator.mediaSession.metadata = new MediaMetadata(meta);
+          pip.meta = meta;
+        }
+      } catch (_) {}
+    }
+    const btn = $('pipBtn');
+    if (btn) btn.classList.toggle('on', pipActive());
+  }
+
+  function pipDraw(note) {
+    const c = pip.ctx;
+    if (!c) return;
+    const W = 640, H = 360;
+    const on = micOpen();
+    c.fillStyle = '#08161b';
+    c.fillRect(0, 0, W, H);
+    if (pip.logo && pip.logo.complete) c.drawImage(pip.logo, 24, 22, 56, 56);
+    c.fillStyle = '#e9f1f3';
+    c.font = 'bold 30px system-ui, sans-serif';
+    c.fillText('CHARLIE', 92, 58);
+    const w = c.measureText('CHARLIE').width;
+    c.fillStyle = '#f26e1a';
+    c.fillText('26', 92 + w, 58);
+    // canali
+    c.fillStyle = '#9fb4ba';
+    c.font = '22px system-ui, sans-serif';
+    const chs = state.me ? state.me.channels.map(chName).join(' · ') : '';
+    c.fillText(chs.length > 44 ? chs.slice(0, 43) + '…' : chs, 24, 118);
+    // chi parla
+    const who = [...state.speaking].filter((id) => !state.me || id !== state.me.id).map((id) => (state.peers.find((p) => p.id === id) || {}).name).filter(Boolean);
+    c.fillStyle = who.length ? '#3ec1cd' : '#5d7a82';
+    c.font = 'bold 34px system-ui, sans-serif';
+    const wtxt = who.length ? '🔊 ' + who.join(', ') : 'nessuno sta parlando';
+    c.fillText(wtxt.length > 30 ? wtxt.slice(0, 29) + '…' : wtxt, 24, 186);
+    // stato microfono
+    c.fillStyle = on ? '#f26e1a' : '#1d3a43';
+    c.fillRect(0, H - 110, W, 110);
+    c.fillStyle = '#ffffff';
+    c.font = 'bold 44px system-ui, sans-serif';
+    c.fillText(on ? '● IN ONDA' : 'MUTO', 24, H - 52);
+    c.font = '22px system-ui, sans-serif';
+    c.fillStyle = on ? '#fff3ea' : '#9fb4ba';
+    c.fillText(note || (on ? [...state.talk].map(chName).join(', ') + ' · ⏸ per chiudere' : '▶ per parlare'), 24, H - 20);
+  }
+
+  async function pipOpen() {
+    pipSetup();
+    pipRefresh();
+    const v = pip.video;
+    await v.play().catch(() => {});
+    if (v.requestPictureInPicture) return v.requestPictureInPicture();
+    if (v.webkitSetPresentationMode) v.webkitSetPresentationMode('picture-in-picture');
+  }
+
+  function pipToggle() {
+    if (pipActive()) {
+      if (document.exitPictureInPicture && document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+      else if (pip.video && pip.video.webkitSetPresentationMode) pip.video.webkitSetPresentationMode('inline');
+      return;
+    }
+    pipOpen().catch(() => banner('Il pop-up non è disponibile in questo browser.', true));
+  }
+
+  function pipInit() {
+    const btn = $('pipBtn');
+    if (!btn) return;
+    if (!pipSupported()) { btn.remove(); return; }
+    btn.addEventListener('click', pipToggle);
+  }
+  pipInit();
+  // API per l'app (Android/iOS): stato da mostrare nel pop-up nativo e tasto parla.
+  window.intercomPip = {
+    state: () => ({ joined: state.joined, micOn: micOpen(), channels: state.me ? state.me.channels.map(chName) : [], talk: [...state.talk].map(chName), speaking: [...state.speaking].filter((id) => !state.me || id !== state.me.id).map((id) => (state.peers.find((p) => p.id === id) || {}).name).filter(Boolean), video: video.list.some((v) => video.remote.has(v.id)) }),
+    toggleMic: (on) => pipToggleMic(on),
+    open: () => pipOpen(),
+  };
 
   // ---------- Schermo sempre acceso ----------
   async function keepScreenOn() {
