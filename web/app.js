@@ -50,6 +50,129 @@
   const roleLabel = (r) => ({ regia: 'Regia', caporeparto: 'Caporeparto', tecnico: 'Tecnico' }[r] || r);
   const micModeLabel = { libero: 'Libero', ptt: 'Solo push-to-talk', admin: 'Solo il caporeparto apre' };
 
+  // ---------- Avatar: quattro mostriciattoli o una foto ----------
+  const PRESETS = ['m1', 'm2', 'm3', 'm4'];
+  const PRESET_NAMES = { m1: 'Bit', m2: 'Byte', m3: 'Pixel', m4: 'Glitch' };
+  let myAvatar = loadJSON('intercom.avatar', null);
+  if (!myAvatar || (myAvatar.kind !== 'foto' && !PRESETS.includes(myAvatar.kind))) {
+    myAvatar = { kind: isConsole ? 'm2' : PRESETS[Math.floor(Math.random() * 4)] };
+  }
+
+  function avatarURL(p) {
+    if (p && p.avatar === 'foto') return '/avatar/' + encodeURIComponent(p.id) + '?v=' + (p.avatarV || 0);
+    return '/static/avatars/' + (p && PRESETS.includes(p.avatar) ? p.avatar : 'm1') + '.svg';
+  }
+  function avatarImg(p, cls) {
+    const img = document.createElement('img');
+    img.className = 'avatar ' + (cls || '');
+    img.alt = '';
+    img.src = avatarURL(p);
+    return img;
+  }
+  function sendAvatar() {
+    if (myAvatar.kind === 'foto') send({ type: 'avatar', image: myAvatar.data });
+    else send({ type: 'avatar', avatar: myAvatar.kind });
+  }
+
+  // Rimpicciolisce e ritaglia la foto sul telefono (160×160, JPEG): pesa
+  // pochi KB e perde i dati nascosti dello scatto (es. posizione GPS).
+  async function photoToDataURL(file) {
+    const bmp = await createImageBitmap(file);
+    const side = Math.min(bmp.width, bmp.height);
+    const c = document.createElement('canvas');
+    c.width = c.height = 160;
+    c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 160, 160);
+    let q = 0.85;
+    let url = c.toDataURL('image/jpeg', q);
+    while (url.length > 60000 && q > 0.4) { q -= 0.15; url = c.toDataURL('image/jpeg', q); }
+    return url;
+  }
+
+  function buildAvatarPicker(box, onChange) {
+    box.textContent = '';
+    const render = () => box.querySelectorAll('button').forEach((b) => b.classList.toggle('sel', b.dataset.kind === myAvatar.kind));
+    const choose = (a) => {
+      myAvatar = a;
+      saveJSON('intercom.avatar', myAvatar);
+      render();
+      if (onChange) onChange();
+    };
+    for (const k of PRESETS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.kind = k;
+      b.title = PRESET_NAMES[k];
+      b.appendChild(avatarImg({ avatar: k }));
+      b.addEventListener('click', () => choose({ kind: k }));
+      box.appendChild(b);
+    }
+    const file = document.createElement('input');
+    file.type = 'file';
+    file.accept = 'image/*';
+    file.className = 'hidden';
+    const foto = document.createElement('button');
+    foto.type = 'button';
+    foto.dataset.kind = 'foto';
+    foto.title = 'Usa una foto';
+    const paintFoto = () => {
+      foto.textContent = '';
+      if (myAvatar.kind === 'foto') {
+        const img = document.createElement('img');
+        img.className = 'avatar';
+        img.src = myAvatar.data;
+        foto.appendChild(img);
+      } else {
+        foto.innerHTML = '<span class="foto-icon">📷</span>';
+      }
+    };
+    foto.addEventListener('click', () => file.click());
+    file.addEventListener('change', async () => {
+      const f = file.files[0];
+      file.value = '';
+      if (!f) return;
+      try {
+        choose({ kind: 'foto', data: await photoToDataURL(f) });
+        paintFoto();
+      } catch (_) {
+        alert('Non riesco a leggere questa immagine. Prova con un\'altra foto.');
+      }
+    });
+    paintFoto();
+    box.append(foto, file);
+    render();
+  }
+
+  function openAvatarDialog() {
+    const ov = document.createElement('div');
+    ov.className = 'overlay';
+    const card = document.createElement('div');
+    card.className = 'card dialog';
+    card.innerHTML = '<h2 style="margin-top:0">Il tuo avatar</h2>';
+    const box = document.createElement('div');
+    box.className = 'avatar-picker';
+    buildAvatarPicker(box, () => { sendAvatar(); paintMeAvatar(); });
+    const close = document.createElement('button');
+    close.className = 'btn secondary';
+    close.textContent = 'Fatto';
+    close.addEventListener('click', () => ov.remove());
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    card.append(box, close);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+  }
+
+  function paintMeAvatar() {
+    const b = $('meAvatar');
+    if (!b) return;
+    b.textContent = '';
+    const img = document.createElement('img');
+    img.className = 'avatar';
+    img.src = myAvatar.kind === 'foto' ? myAvatar.data : '/static/avatars/' + myAvatar.kind + '.svg';
+    b.appendChild(img);
+  }
+  if ($('avatarPicker')) buildAvatarPicker($('avatarPicker'));
+  if ($('meAvatar')) $('meAvatar').addEventListener('click', openAvatarDialog);
+
   // ---------- Ingresso ----------
   const nameInput = $('nameInput');
   if (nameInput) nameInput.value = loadJSON('intercom.name', isConsole ? 'Regia' : '');
@@ -301,6 +424,8 @@
     setMe(Object.assign({ id: m.id }, m.me), true);
     // Dopo una riconnessione il server riparte da zero: gli ripeto lo stato.
     for (const c of state.listenOff) send({ type: 'listen', channel: c, on: false });
+    sendAvatar();
+    paintMeAvatar();
     applyTalk(true);
   }
 
@@ -638,6 +763,7 @@
       const name = document.createElement('span');
       name.textContent = p.name;
       name.className = 'name' + (state.speaking.has(p.id) ? ' talking' : '');
+      li.appendChild(avatarImg(p, 'small'));
       const b = document.createElement('button');
       b.className = 'mini ' + (open ? 'danger' : '');
       b.textContent = open ? 'Chiudi mic' : 'Apri mic';
@@ -655,6 +781,7 @@
     for (const p of state.peers) {
       const li = document.createElement('li');
       if (state.speaking.has(p.id)) li.classList.add('speaking');
+      li.appendChild(avatarImg(p));
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = p.name + (p.id === state.me.id ? ' (tu)' : '');

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><title>Byte</title>
+<rect width="64" height="64" rx="14" fill="#2c2142"/>
+<rect x="14" y="18" width="36" height="36" rx="9" fill="#b18cf2"/>
+<path d="M12 30 Q12 10 32 10 Q52 10 52 30" stroke="#222" stroke-width="4" fill="none"/>
+<rect x="8" y="27" width="8" height="12" rx="3" fill="#333"/><rect x="48" y="27" width="8" height="12" rx="3" fill="#333"/>
+<path d="M12 39 Q14 48 24 47" stroke="#333" stroke-width="2.5" fill="none"/><circle cx="25" cy="47" r="2.5" fill="#333"/>
+<circle cx="25" cy="32" r="6" fill="#fff" stroke="#222" stroke-width="2.5"/><circle cx="39" cy="32" r="6" fill="#fff" stroke="#222" stroke-width="2.5"/>
+<path d="M31 32 H33" stroke="#222" stroke-width="2.5"/>
+<circle cx="26" cy="33" r="2.5" fill="#222"/><circle cx="40" cy="33" r="2.5" fill="#222"/>
+<path d="M28 44 H38" stroke="#4b2d7a" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

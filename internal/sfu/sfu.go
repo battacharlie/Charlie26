@@ -64,6 +64,8 @@ type PeerInfo struct {
 	Talk     []string `json:"talk"`             // canali su cui sta parlando ora
 	Forced   []string `json:"forced,omitempty"` // canali aperti dal suo responsabile
 	Muted    []string `json:"muted,omitempty"`  // canali che ha smesso di ascoltare
+	Avatar   string   `json:"avatar,omitempty"` // "m1"…"m4" oppure "foto"
+	AvatarV  int      `json:"avatarV,omitempty"`
 }
 
 // Room è l'insieme di canali e partecipanti.
@@ -120,6 +122,11 @@ type Peer struct {
 	talk   map[string]bool // canali su cui ha chiesto di parlare
 	forced map[string]bool // canali aperti dal suo responsabile
 	muted  map[string]bool // canali che non vuole ascoltare
+
+	avatar     string // "m1"…"m4", "foto" o vuoto
+	avatarImg  []byte
+	avatarMime string
+	avatarVer  int
 
 	senders    map[string]*dest // id flusso -> copia verso questo peer
 	needsOffer bool             // serve una nuova negoziazione appena finisce quella in corso
@@ -537,6 +544,8 @@ func (p *Peer) infoLocked() PeerInfo {
 		Talk:     r.orderedLocked(p.speaking()),
 		Forced:   r.orderedLocked(p.forced),
 		Muted:    r.orderedLocked(p.muted),
+		Avatar:   p.avatar,
+		AvatarV:  p.avatarVer,
 	}
 }
 

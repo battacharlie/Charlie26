@@ -310,3 +310,18 @@ body[data-role=regia] .ptt-all { min-height: 52px; }
 body[data-role=regia] .talk .switch { justify-self: start; }
 body[data-role=regia] .people .peers li .who { min-width: 120px; }
 a.mini { text-decoration: none; display: inline-block; }
+
+/* ---------- Avatar ---------- */
+.avatar { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; flex: none; display: block; background: #22262d; }
+.avatar.small { width: 26px; height: 26px; border-radius: 7px; }
+.peers li .avatar { margin-right: .1rem; }
+.peers li.speaking .avatar { outline: 2px solid var(--talk); outline-offset: 1px; }
+.me-avatar { padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+.me-avatar .avatar { width: 32px; height: 32px; }
+.avatar-picker { display: flex; gap: .5rem; margin: .4rem 0; flex-wrap: wrap; }
+.avatar-picker button { padding: 3px; border-radius: 14px; border: 2px solid transparent; background: none; cursor: pointer; }
+.avatar-picker button .avatar { width: 52px; height: 52px; border-radius: 11px; }
+.avatar-picker button.sel { border-color: #2f6fed; }
+.avatar-picker .foto-icon { display: flex; width: 52px; height: 52px; align-items: center; justify-content: center; font-size: 1.6rem; background: #22262d; border-radius: 11px; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+.dialog { max-width: 420px; width: 100%; }

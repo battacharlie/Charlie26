@@ -76,6 +76,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 	s.common(mux)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("GET /avatar/{id}", s.handleAvatar)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/regia/evento", s.onlyRegia(s.handleEventGet))
 	mux.HandleFunc("POST /api/regia/evento", s.onlyRegia(s.handleEventChange))
@@ -195,6 +196,18 @@ func (s *Server) handleRNNoise(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(s.rnnoise)
 }
 
+func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
+	img, mime, ok := s.cfg.Room.AvatarImage(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Cache-Control", "max-age=86400") // l'indirizzo cambia a ogni nuova foto (?v=)
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	_, _ = w.Write(img)
+}
+
 // clientMsg è un messaggio dal browser.
 type clientMsg struct {
 	Type        string                   `json:"type"`
@@ -210,6 +223,8 @@ type clientMsg struct {
 	Peer        string                   `json:"peer"`
 	MicMode     string                   `json:"micMode"`
 	Video       bool                     `json:"video"`
+	Avatar      string                   `json:"avatar"`
+	Image       string                   `json:"image"`
 	SDP         string                   `json:"sdp"`
 	Candidate   *webrtc.ICECandidateInit `json:"candidate"`
 	On          bool                     `json:"on"`
@@ -226,7 +241,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	conn.SetReadLimit(64 << 10)
+	conn.SetReadLimit(128 << 10) // abbastanza per una foto profilo rimpicciolita
 
 	out := make(chan sfu.Message, 64)
 	done := make(chan struct{})
@@ -328,6 +343,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "listen":
 			if peer != nil {
 				peer.SetListen(m.Channel, m.On)
+			}
+		case "avatar":
+			if peer != nil {
+				if err := peer.SetAvatar(m.Avatar, m.Image); err != nil {
+					send(sfu.Message{Type: "error", Error: err.Error()})
+				}
 			}
 		case "control", "channelSettings", "kick", "promote", "demote":
 			if peer == nil {
