@@ -316,12 +316,13 @@ func TestPagesAndCA(t *testing.T) {
 	ts, _ := startServer(t)
 	client := ts.Client()
 	for path, want := range map[string]string{
-		"/":              "Intercom di produzione",
-		"/regia":         "Console di regia",
-		"/aiuto":         "https://127.0.0.1:8443/",
-		"/ca.crt":        "BEGIN CERTIFICATE",
-		"/static/app.js": "getUserMedia",
-		"/api/info":      `"produzione"`,
+		"/":                          "Intercom di produzione",
+		"/regia":                     "Console di regia",
+		"/aiuto":                     "https://127.0.0.1:8443/",
+		"/ca.crt":                    "BEGIN CERTIFICATE",
+		"/static/app.js":             "getUserMedia",
+		"/api/info":                  `"produzione"`,
+		"/static/rnnoise-worklet.js": "registerProcessor('rnnoise'",
 	} {
 		resp, err := client.Get(ts.URL + path)
 		if err != nil {
@@ -333,7 +334,18 @@ func TestPagesAndCA(t *testing.T) {
 			t.Fatalf("%s: stato %d, manca %q", path, resp.StatusCode, want)
 		}
 	}
-	resp, err := client.Get(ts.URL + "/qr/app.png")
+	// Il modulo del filtro non deve contenere "export": deve essere un unico script.
+	resp, err := client.Get(ts.URL + "/static/rnnoise-worklet.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(body), "export default") || !strings.Contains(string(body), "createRNNWasmModuleSync") {
+		t.Fatal("rnnoise-worklet.js non è stato unito correttamente")
+	}
+
+	resp, err = client.Get(ts.URL + "/qr/app.png")
 	if err != nil {
 		t.Fatal(err)
 	}

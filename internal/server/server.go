@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -37,6 +38,9 @@ type Config struct {
 type Server struct {
 	cfg      Config
 	upgrader websocket.Upgrader
+
+	rnnoiseOnce sync.Once
+	rnnoise     []byte
 }
 
 // New crea il server.
@@ -74,6 +78,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
+	mux.HandleFunc("GET /static/rnnoise-worklet.js", s.handleRNNoise)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.cfg.Web)))
 	return securityHeaders(mux)
 }
@@ -161,6 +166,27 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"peers":    s.cfg.Room.Peers(),
 		"channels": s.cfg.Room.Channels(),
 	})
+}
+
+// handleRNNoise unisce la libreria RNNoise e il nostro AudioWorklet in un
+// unico modulo: dentro un AudioWorklet non tutti i browser permettono import.
+func (s *Server) handleRNNoise(w http.ResponseWriter, r *http.Request) {
+	s.rnnoiseOnce.Do(func() {
+		lib, err1 := fs.ReadFile(s.cfg.Web, "rnnoise/rnnoise-sync.js")
+		proc, err2 := fs.ReadFile(s.cfg.Web, "rnnoise/processor.js")
+		if err1 != nil || err2 != nil {
+			return
+		}
+		code := strings.Replace(string(lib), "export default createRNNWasmModuleSync;", "", 1)
+		s.rnnoise = []byte(code + "\n" + string(proc))
+	})
+	if s.rnnoise == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=86400") // 1,9 MB: lo si scarica una volta al giorno
+	_, _ = w.Write(s.rnnoise)
 }
 
 // clientMsg è un messaggio dal browser.

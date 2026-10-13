@@ -206,3 +206,8 @@ kbd { background: #2a2e35; border-radius: 4px; padding: 0 .35rem; font-family: i
 body:not([data-role=regia]) .talk .people { order: 2; }
 body:not([data-role=regia]) .talk .channels { order: 3; margin-top: auto; }
 body:not([data-role=regia]) .talk .mic-area { order: 4; margin-top: 0; }
+
+.switch { display: grid; grid-template-columns: auto 1fr; gap: 0 .6rem; align-items: center; padding: .4rem .2rem; cursor: pointer; }
+.switch input { width: 22px; height: 22px; accent-color: var(--talk); }
+.switch small { grid-column: 2; font-size: .8rem; }
+body:not([data-role=regia]) .talk .switch { order: 3; }

@@ -27,6 +27,9 @@
     trackOwner: new Map(), // id traccia ricevuta -> id partecipante
     speaking: new Set(),   // partecipanti con voce rilevata ora
     localLevel: 0,
+    noise: loadJSON('intercom.rumore', false), // riduzione rumore forte (RNNoise)
+    nsChain: null,       // { ctx, track } catena RNNoise attiva
+    sender: null,        // RTCRtpSender del microfono
     wakeLock: null,
     joined: false,
   };
@@ -101,6 +104,8 @@
         'Su iPhone: Impostazioni › Safari › Microfono. Su Android: tocca il lucchetto nella barra degli indirizzi › Autorizzazioni.');
       return;
     }
+    addNoiseSwitch();
+    if (state.noise) await setNoise(true);
     applyTalk(true);
     startLevelMeter();
     $('joinView').classList.add('hidden');
@@ -136,7 +141,7 @@
     state.ws = ws;
     state.pc = pc;
 
-    state.stream.getAudioTracks().forEach((t) => pc.addTrack(t, state.stream));
+    state.sender = pc.addTrack(sendTrack(), state.stream);
 
     pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate.toJSON() }); };
     pc.ontrack = (e) => attachRemote(e.track, e.streams[0]);
@@ -490,7 +495,7 @@
     if (same && !force) return;
     const wasTalking = state.talk.size > 0;
     state.talk = next;
-    if (state.stream) state.stream.getAudioTracks().forEach((t) => { t.enabled = next.size > 0; });
+    for (const t of micTracks()) t.enabled = next.size > 0;
     send({ type: 'talk', channels: [...next] });
     if (!force && navigator.vibrate && wasTalking !== next.size > 0) navigator.vibrate(next.size ? 25 : [10, 40, 10]);
     updateUI();
@@ -560,6 +565,55 @@
       tick();
       document.addEventListener('visibilitychange', () => { if (ctx.state === 'suspended') ctx.resume(); });
     } catch (_) { /* non indispensabile */ }
+  }
+
+  // ---------- Riduzione rumore forte (RNNoise, lo stesso filtro di Jitsi) ----------
+  const rawTrack = () => state.stream.getAudioTracks()[0];
+  const sendTrack = () => (state.nsChain ? state.nsChain.track : rawTrack());
+  const micTracks = () => (state.stream ? [rawTrack(), state.nsChain && state.nsChain.track].filter(Boolean) : []);
+
+  function addNoiseSwitch() {
+    if ($('nsToggle')) return;
+    const label = document.createElement('label');
+    label.className = 'switch';
+    label.innerHTML = '<input type="checkbox" id="nsToggle"><span>Riduzione rumore forte</span><small class="muted">per ambienti rumorosi (palco, sala macchine)</small>';
+    $('channelList').insertAdjacentElement('afterend', label);
+    const box = $('nsToggle');
+    box.checked = state.noise;
+    box.addEventListener('change', async () => {
+      const ok = await setNoise(box.checked);
+      if (!ok) box.checked = false;
+      state.noise = box.checked;
+      saveJSON('intercom.rumore', state.noise);
+    });
+  }
+
+  async function setNoise(on) {
+    if (on && !state.nsChain) {
+      let ctx;
+      try {
+        try { ctx = new AudioContext({ sampleRate: 48000 }); } catch (_) { ctx = new AudioContext(); }
+        await ctx.audioWorklet.addModule('/static/rnnoise-worklet.js?v=1');
+        const src = ctx.createMediaStreamSource(state.stream);
+        const node = new AudioWorkletNode(ctx, 'rnnoise', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+        const dest = ctx.createMediaStreamDestination();
+        src.connect(node).connect(dest);
+        if (ctx.state === 'suspended') await ctx.resume();
+        state.nsChain = { ctx, track: dest.stream.getAudioTracks()[0] };
+      } catch (e) {
+        console.error('RNNoise', e);
+        if (ctx) ctx.close().catch(() => {});
+        banner('Riduzione rumore forte non disponibile su questo browser.', false);
+        return false;
+      }
+    } else if (!on && state.nsChain) {
+      const old = state.nsChain;
+      state.nsChain = null;
+      setTimeout(() => old.ctx.close().catch(() => {}), 500);
+    }
+    for (const t of micTracks()) t.enabled = state.talk.size > 0;
+    if (state.sender) await state.sender.replaceTrack(sendTrack()).catch(() => {});
+    return true;
   }
 
   // ---------- Schermo sempre acceso ----------
