@@ -81,7 +81,20 @@
     $('configActions').append(
       el('a', { class: 'mini primary', href: '/api/regia/esporta', download: '', title: tip }, '⬇ Esporta'),
       el('button', { class: 'mini', onclick: () => file.click(), title: tip }, '⬆ Importa…'),
-      file);
+      file,
+      el('button', { class: 'mini danger', onclick: shutdown, title: 'Scollega tutti i tecnici e chiude il programma (su Windows anche dall\'icona vicino all\'orologio)' }, '⏻ Spegni'));
+  }
+
+  // Spegne il programma e chiude solo questa scheda del browser.
+  async function shutdown() {
+    if (!confirm('Spegnere CHARLIE26? Tutti i tecnici verranno scollegati e questa scheda si chiuderà.')) return;
+    try {
+      await fetch('/api/regia/spegni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    } catch (_) {}
+    document.body.innerHTML = '<div class="doc"><h1>CHARLIE26 spento</h1><p class="muted">Puoi chiudere questa scheda. Per riaccenderlo avvia di nuovo il programma.</p></div>';
+    // I browser permettono a una pagina di chiudere la propria scheda solo se è stata
+    // aperta dal programma (o da uno script); altrimenti resta il messaggio qui sopra.
+    window.close();
   }
 
   function renderTabs() {
@@ -166,15 +179,6 @@
       el('button', { class: 'mini primary', onclick: () => callModels({ op: 'save', nome: modelName.value }, 'Modello salvato') }, '💾 Salva come modello')), models);
     callModels();
 
-    body.append(el('h2', {}, 'Programma'));
-    body.append(el('div', { class: 'row' }, el('button', {
-      class: 'mini danger',
-      onclick: async () => {
-        if (!confirm('Spegnere l\'intercom? Tutti i tecnici verranno scollegati.')) return;
-        await fetch('/api/regia/spegni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        document.body.innerHTML = '<div class="doc"><h1>Intercom spento</h1><p class="muted">Per riaccenderlo avvia di nuovo il programma.</p></div>';
-      },
-    }, '⏻ Spegni il programma'), el('span', { class: 'small muted' }, 'Su Windows si può spegnere anche dall\'icona vicino all\'orologio.')));
   }
 
   // QR: generale, per canale (libero accesso) o per utente (credenziali).
@@ -446,6 +450,55 @@
     loadNet();
   }
 
+  // Misure dei riquadri della console, trascinando le maniglie; restano salvate nel browser.
+  function setupSplitters() {
+    const desk = document.querySelector('.desk');
+    const v = $('splitV'), h = $('splitH');
+    if (!desk || !v || !h) return;
+    const KEY = 'regia.misure';
+    let size = {};
+    try { size = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (_) {}
+    const apply = () => {
+      desk.style.removeProperty('--side-w'); desk.style.removeProperty('--top'); desk.style.removeProperty('--bottom');
+      if (size.side) desk.style.setProperty('--side-w', size.side + 'px');
+      if (size.top) { desk.style.setProperty('--top', size.top + 'fr'); desk.style.setProperty('--bottom', (100 - size.top) + 'fr'); }
+    };
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify(size)); } catch (_) {} };
+    const drag = (handle, cls, move) => {
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        handle.classList.add('drag');
+        document.body.classList.add('resizing', cls);
+        const onMove = (ev) => { move(ev); apply(); };
+        const onUp = () => {
+          handle.removeEventListener('pointermove', onMove);
+          handle.classList.remove('drag');
+          document.body.classList.remove('resizing', cls);
+          save();
+        };
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', onUp, { once: true });
+        handle.addEventListener('pointercancel', onUp, { once: true });
+      });
+    };
+    drag(v, 'col', (e) => {
+      const r = desk.getBoundingClientRect();
+      // colonna sinistra tra 200 px e metà schermo
+      size.side = Math.round(Math.max(200, Math.min(r.width * 0.5, e.clientX - r.left - 12)));
+    });
+    drag(h, 'row', (e) => {
+      const c = $('config').getBoundingClientRect(), i = document.querySelector('.desk > .intercom').getBoundingClientRect();
+      const total = i.bottom - c.top - 12;
+      // ognuno dei due riquadri resta almeno al 12% dell'altezza
+      size.top = Math.round(Math.max(12, Math.min(88, (e.clientY - c.top - 6) / total * 100)) * 10) / 10;
+    });
+    v.addEventListener('dblclick', () => { delete size.side; apply(); save(); });
+    h.addEventListener('dblclick', () => { delete size.top; apply(); save(); });
+    apply();
+  }
+
+  setupSplitters();
   setupFileActions();
   load();
 })();

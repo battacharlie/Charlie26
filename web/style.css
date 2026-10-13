@@ -200,6 +200,7 @@ kbd { background: #173038; border-radius: 4px; padding: 0 .35rem; font-family: i
 body:not([data-role=regia]) .talk .people { order: 2; }
 body:not([data-role=regia]) .talk .channels { order: 3; margin-top: auto; }
 body:not([data-role=regia]) .talk .mic-area { order: 4; margin-top: 0; }
+body:not([data-role=regia]) .talk .sign { order: 5; padding-top: .4rem; }
 
 .switch { display: grid; grid-template-columns: auto 1fr; gap: 0 .6rem; align-items: center; padding: .4rem .2rem; cursor: pointer; }
 .switch input { width: 22px; height: 22px; accent-color: var(--talk); }
@@ -249,10 +250,10 @@ body:not([data-role=regia]) .talk .switch { order: 3; }
 body[data-role=regia] { overflow: hidden; }
 .desk {
   display: grid;
-  grid-template-columns: clamp(240px, 19vw, 330px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 42fr) minmax(0, 58fr);
-  grid-template-areas: "side config" "side intercom";
-  gap: 12px;
+  /* Le misure si cambiano trascinando le maniglie (variabili impostate da admin.js). */
+  grid-template-columns: var(--side-w, clamp(240px, 19vw, 330px)) 12px minmax(0, 1fr);
+  grid-template-rows: minmax(0, var(--top, 60fr)) 12px minmax(0, var(--bottom, 40fr));
+  grid-template-areas: "side vsplit config" "side vsplit hsplit" "side vsplit intercom";
   height: 100vh;
   padding: 12px;
 }
@@ -260,6 +261,18 @@ body[data-role=regia] { overflow: hidden; }
 .side { grid-area: side; display: flex; flex-direction: column; }
 .config { grid-area: config; display: flex; flex-direction: column; }
 .intercom { grid-area: intercom; }
+.splitter { position: relative; touch-action: none; }
+.splitter.v { grid-area: vsplit; cursor: col-resize; }
+.splitter.h { grid-area: hsplit; cursor: row-resize; }
+.splitter::after { content: ""; position: absolute; border-radius: 2px; background: var(--line); transition: background .15s; }
+.splitter.v::after { left: 5px; width: 2px; top: 50%; height: 48px; margin-top: -24px; }
+.splitter.h::after { top: 5px; height: 2px; left: 50%; width: 48px; margin-left: -24px; }
+.splitter:hover::after, .splitter.drag::after { background: var(--accent); }
+.splitter.v:hover::after, .splitter.v.drag::after { top: 0; height: 100%; margin-top: 0; }
+.splitter.h:hover::after, .splitter.h.drag::after { left: 0; width: 100%; margin-left: 0; }
+body.resizing { user-select: none; }
+body.resizing.col { cursor: col-resize; }
+body.resizing.row { cursor: row-resize; }
 .side-head { display: flex; align-items: baseline; gap: .5rem; }
 .side h2 { margin: 1rem 0 .5rem; font-size: 1rem; }
 .qr-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: .6rem; }
@@ -312,7 +325,8 @@ body[data-role=regia] .mic-area { grid-area: foot; padding: 0; margin: 0 0 0 aut
 body[data-role=regia] .ptt-all { min-height: 52px; }
 @media (max-width: 1000px), (max-height: 600px) {
   body[data-role=regia] { overflow: auto; }
-  .desk { height: auto; grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "config" "intercom" "side"; }
+  .desk { height: auto; gap: 12px; grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "config" "intercom" "side"; }
+  .splitter { display: none; }
   body[data-role=regia] .talk { grid-template-columns: 1fr; grid-template-areas: "top" "banner" "chans" "foot" "people"; }
   body[data-role=regia] .people { border-left: 0; padding-left: 0; }
 }
@@ -394,5 +408,13 @@ body { background-attachment: fixed; }
 .credits a { color: var(--muted); }
 .join .credits { margin-top: 1.4rem; text-align: center; }
 .side .credits { margin-top: auto; padding-top: .8rem; }
+a.brand { color: inherit; text-decoration: none; }
+/* Firma discreta nella schermata di utilizzo dei telefoni */
+.topbar .mark { flex: none; display: block; line-height: 0; opacity: .85; }
+.topbar .mark img { width: 24px; height: 24px; }
+.sign { display: block; text-align: center; font-size: .68rem; line-height: 1.4; color: var(--muted); opacity: .75; text-decoration: none; padding: .9rem .5rem .3rem; }
+.sign b { color: var(--text); font-weight: 800; letter-spacing: .02em; }
+.sign b span { color: var(--brand-orange); }
+.sign:hover, .sign:active { opacity: 1; text-decoration: underline; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .console-title { font-size: .95rem; color: var(--muted); font-weight: 600; margin: .3rem 0 0; }
