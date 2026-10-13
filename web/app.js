@@ -357,6 +357,7 @@
 
   const exitBtn = $('exitBtn');
   if (exitBtn) exitBtn.addEventListener('click', () => { if (confirm('Uscire dall\'intercom?')) backToJoin(''); });
+  window.intercomLeave = () => { if (state.joined) backToJoin(''); };
 
   // ---------- Collegamento al server ----------
   function connect() {
