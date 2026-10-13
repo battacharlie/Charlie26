@@ -81,8 +81,8 @@ func (l *Local) loadOrCreateCA() error {
 	tmpl := &x509.Certificate{
 		SerialNumber: randomSerial(),
 		Subject: pkix.Name{
-			CommonName:   "Intercom Regia CA (" + host + ")",
-			Organization: []string{"Intercom Regia"},
+			CommonName:   "CHARLIE26 CA (" + host + ")",
+			Organization: []string{"CHARLIE26"},
 		},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(caValidity),
@@ -123,7 +123,7 @@ func (l *Local) ensureServer(hosts []string) error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: randomSerial(),
-		Subject:      pkix.Name{CommonName: "Intercom Regia", Organization: []string{"Intercom Regia"}},
+		Subject:      pkix.Name{CommonName: "CHARLIE26", Organization: []string{"CHARLIE26"}},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(serverValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

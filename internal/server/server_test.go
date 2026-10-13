@@ -821,7 +821,7 @@ func TestPagesAndCA(t *testing.T) {
 	ts, _ := startServer(t, nil)
 	client := ts.Client()
 	for path, want := range map[string]string{
-		"/":                          "Intercom di produzione",
+		"/":                          "CHARLIE26",
 		"/regia":                     "Console di regia",
 		"/aiuto":                     "https://127.0.0.1:8443/",
 		"/ca.crt":                    "BEGIN CERTIFICATE",

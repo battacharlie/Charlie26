@@ -14,6 +14,7 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tc-hib/winres v0.3.1
 	golang.org/x/crypto v0.48.0
+	golang.org/x/image v0.12.0
 	golang.org/x/sys v0.41.0
 )
 
@@ -32,7 +33,6 @@ require (
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/image v0.12.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )

@@ -1,4 +1,6 @@
-# Intercom di produzione
+<p align="center"><img src="web/brand/logo-charlie26.png" alt="CHARLIE26 – Intercom Evoluto" width="520"></p>
+
+# CHARLIE26 – Intercom Evoluto
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
@@ -8,7 +10,7 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 
 ```
 📱 Telefono ──voce──▶ 💻 Computer di regia ──voce──▶ 📱 altri telefoni
-                       (intercom.exe: riceve ogni voce
+                       (charlie26.exe: riceve ogni voce
                         e la smista a chi deve sentirla)
 ```
 
@@ -24,7 +26,7 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 3. Se usi OBS: copia in OBS indirizzo e chiave della scheda *Video* (servizio WHIP).
 
 **In regia, all'arrivo**
-1. Collega il PC alla rete dell'evento (meglio via cavo) e avvia `intercom`.
+1. Collega il PC alla rete dell'evento (meglio via cavo) e avvia `charlie26`.
 2. Controlla in console la **rete usata nei QR** (colonna sinistra): deve essere quella su cui stanno i telefoni.
 3. Carica il modello dell'evento, se l'hai preparato.
 4. Apri il **pannello intercom** (in basso) e prova un tasto PARLA.
@@ -57,12 +59,12 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 
 | File | Per |
 |---|---|
-| `intercom-windows-amd64.exe` | Windows 10/11 |
-| `intercom-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
-| `intercom-darwin-amd64` | Mac con processore Intel |
+| `charlie26-windows-amd64.exe` | Windows 10/11 |
+| `charlie26-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
+| `charlie26-darwin-amd64` | Mac con processore Intel |
 
 ### Primo avvio su Windows
-1. Doppio clic su `intercom-windows-amd64.exe`. Se compare "Windows ha protetto il PC", scegli **Ulteriori informazioni → Esegui comunque**.
+1. Doppio clic su `charlie26-windows-amd64.exe`. Se compare "Windows ha protetto il PC", scegli **Ulteriori informazioni → Esegui comunque**.
 2. Al primo avvio Windows chiede se consentire l'accesso alla rete: spunta **Reti private** e premi **Consenti**. Senza questo passaggio i telefoni non si collegano.
 3. Si apre nel browser la **console di regia**. Non compare nessuna finestra nera: il programma resta attivo come **icona vicino all'orologio** (un microfono bianco su un tondo rosso; se non la vedi, cercala sotto la freccetta ˄).
    - **clic sinistro** sull'icona: riapre la console;
@@ -73,9 +75,9 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 ### Primo avvio su Mac
 I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 1. apri il Terminale nella cartella del file;
-2. `chmod +x intercom-darwin-arm64` (oppure `-amd64`);
-3. `xattr -d com.apple.quarantine intercom-darwin-arm64`;
-4. `./intercom-darwin-arm64`.
+2. `chmod +x charlie26-darwin-arm64` (oppure `-amd64`);
+3. `xattr -d com.apple.quarantine charlie26-darwin-arm64`;
+4. `./charlie26-darwin-arm64`.
 
 ## Collegare i telefoni
 
@@ -167,7 +169,7 @@ L'interruttore **Riduzione rumore forte** attiva RNNoise, lo stesso filtro di Ji
 
 ## Opzioni (avanzate)
 
-Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
+Si passano da riga di comando, per esempio `charlie26.exe -ip 192.168.1.10`:
 
 | Opzione | Predefinito | Cosa fa |
 |---|---|---|
@@ -180,13 +182,13 @@ Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
 
-Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), le cartelle `modelli` e `immagini` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
+Cartella dati predefinita: `%AppData%\Charlie26` su Windows e `~/Library/Application Support/Charlie26` su Mac (se trova la cartella `IntercomRegia` delle versioni precedenti, la riprende da sola). Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), le cartelle `modelli` e `immagini` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
 ### Certificato di dominio (nessun avviso sui telefoni)
 Se hai un certificato valido per un dominio (es. wildcard `*.intercom.tuodominio.it`) e un DNS che risolve `192-168-1-10.intercom.tuodominio.it` su `192.168.1.10`:
 
 ```
-intercom.exe -cert fullchain.pem -key privkey.pem -dominio intercom.tuodominio.it
+charlie26.exe -cert fullchain.pem -key privkey.pem -dominio intercom.tuodominio.it
 ```
 
 In alternativa copia i file come `dominio.crt` e `dominio.key` nella cartella `certificati` dei dati. La guida completa per ottenerli arriverà più avanti.
@@ -205,3 +207,7 @@ go run ./tools/winres -version 1.0.0  # icona e versione per l'eseguibile Window
 
 - [RNNoise](https://github.com/xiph/rnnoise) (BSD 3 clausole), nella build WebAssembly [`@jitsi/rnnoise-wasm`](https://github.com/jitsi/rnnoise-wasm) (Apache 2.0): vedi `web/rnnoise/`.
 - [Pion WebRTC](https://github.com/pion/webrtc) (MIT), [gorilla/websocket](https://github.com/gorilla/websocket) (BSD), [go-qrcode](https://github.com/skip2/go-qrcode) (MIT).
+
+## Credits
+
+**CHARLIE26 – Intercom Evoluto** · Andrea Battaglioli – [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · ABit/s · Made in Bolognina

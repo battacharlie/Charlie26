@@ -185,7 +185,7 @@ func (s *Server) handleCA(w http.ResponseWriter, r *http.Request) {
 	}
 	// Questo tipo MIME fa aprire a iOS e Android la procedura di installazione.
 	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-	w.Header().Set("Content-Disposition", `attachment; filename="Intercom-Regia-CA.crt"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="CHARLIE26-CA.crt"`)
 	_, _ = w.Write(s.cfg.CAPEM)
 }
 

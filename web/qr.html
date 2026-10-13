@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QR da stampare</title>
-  <link rel="icon" href="data:,">
+  <title>CHARLIE26 – QR da stampare</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
   <style>
     /* Pagina da stampare: bianco e nero, A4, schede da ritagliare. */
     @page { size: A4; margin: 10mm; }
@@ -15,6 +17,10 @@
     .bar label { display: inline-flex; gap: 6px; align-items: center; }
     .sheet { width: 210mm; margin: 12px auto; background: #fff; padding: 10mm; }
     h1 { font-size: 18px; margin: 0 0 6mm; }
+    .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6mm; }
+    .head img { height: 16mm; }
+    .head h1 { margin: 0; }
+    .foot { margin-top: 6mm; font-size: 10px; color: #666; text-align: center; }
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
     .card { border: 1px dashed #999; border-radius: 3mm; padding: 4mm; text-align: center; break-inside: avoid; }
     .card img { width: 46mm; height: 46mm; display: block; margin: 0 auto 2mm; }
@@ -35,8 +41,9 @@
     <span>Per il PDF scegli "Salva come PDF" come stampante.</span>
   </div>
   <div class="sheet">
-    <h1 id="title">Intercom</h1>
+    <div class="head"><img src="/static/brand/logo-charlie26.png" alt="CHARLIE26 – Intercom Evoluto"><h1 id="title"></h1></div>
     <div class="grid" id="grid"></div>
+    <div class="foot">CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – www.andreabattaglioli.it · ABit/s · Made in Bolognina</div>
   </div>
   <script>
     (async () => {
@@ -45,7 +52,7 @@
         fetch('/api/info').then((r) => r.json()),
       ]);
       const cred = ev.mode === 'credenziali';
-      document.getElementById('title').textContent = 'Intercom – ' + ev.name;
+      document.getElementById('title').textContent = ev.name;
       const grid = document.getElementById('grid');
       const card = (src, title, sub, how, cls) => {
         const d = document.createElement('div');
@@ -64,7 +71,7 @@
         grid.appendChild(d);
       };
       const how = 'Inquadra con la fotocamera del telefono';
-      card('/qr/app.png', 'Intercom', cred ? 'accesso con utente e password' : 'scegli il tuo canale', how);
+      card('/qr/app.png', 'CHARLIE26', cred ? 'accesso con utente e password' : 'scegli il tuo canale', how);
       if (cred) {
         for (const u of ev.users || []) {
           const chs = (u.channels || []).map((id) => (ev.channels.find((c) => c.id === id) || {}).name).filter(Boolean).join(', ');

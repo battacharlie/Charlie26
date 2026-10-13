@@ -34,11 +34,11 @@ func main() {
 	vi.SetFileVersion(v)
 	vi.SetProductVersion(v)
 	for k, val := range map[string]string{
-		version.ProductName:      "Intercom Regia",
-		version.FileDescription:  "Intercom di produzione via WebRTC",
-		version.CompanyName:      "Andrea Battaglioli",
-		version.OriginalFilename: "intercom.exe",
-		version.LegalCopyright:   "Andrea Battaglioli",
+		version.ProductName:      "CHARLIE26 – Intercom Evoluto",
+		version.FileDescription:  "CHARLIE26 – Intercom Evoluto",
+		version.OriginalFilename: "charlie26.exe",
+		version.CompanyName:      "Andrea Battaglioli – ABit/s",
+		version.LegalCopyright:   "Andrea Battaglioli – www.andreabattaglioli.it – ABit/s – Made in Bolognina",
 	} {
 		_ = vi.Set(0x0410, k, val) // italiano
 	}

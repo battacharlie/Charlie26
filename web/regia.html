@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Console di regia</title>
-  <link rel="icon" href="data:,">
+  <title>CHARLIE26 – Console di regia</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-role="regia">
@@ -12,7 +14,10 @@
     <!-- Colonna sinistra: QR e anteprime video -->
     <aside class="card side">
       <div class="side-head">
-        <h1>Console di regia</h1>
+        <div class="brand"><img src="/static/brand/icon-192.png" alt=""><div><span class="word">CHARLIE<b>26</b></span><span class="tag">INTERCOM EVOLUTO</span></div></div>
+      </div>
+      <div class="side-head">
+        <h1 class="console-title">Console di regia</h1>
         <span class="muted small" title="Versione">{{VERSION}}</span>
       </div>
       <div class="qr-pair">
@@ -37,6 +42,7 @@
       <div class="previews" id="previews">
         <div class="preview-empty">Nessun segnale video.<br><span class="small">Qui compaiono le anteprime dei video inviati ai canali (massimo 15 fps). Clic per vederli grandi.</span></div>
       </div>
+      <p class="credits">CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – <a href="https://www.andreabattaglioli.it" target="_blank" rel="noopener">www.andreabattaglioli.it</a> · ABit/s · Made in Bolognina</p>
     </aside>
 
     <!-- In alto a destra: configurazione dell'evento -->

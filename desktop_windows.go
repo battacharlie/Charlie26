@@ -17,7 +17,7 @@ const desktopHint = "  Il programma resta attivo come icona vicino all'orologio 
 
 func showError(msg string) {
 	text, _ := windows.UTF16PtrFromString(msg)
-	title, _ := windows.UTF16PtrFromString("Intercom regia")
+	title, _ := windows.UTF16PtrFromString("CHARLIE26 – Intercom Evoluto")
 	const mbOK, mbIconError, mbTopMost = 0x0, 0x10, 0x40000
 	_, _ = windows.MessageBox(0, text, title, mbOK|mbIconError|mbTopMost)
 }
@@ -25,8 +25,8 @@ func showError(msg string) {
 func runDesktop(d desktop) {
 	systray.Run(func() {
 		systray.SetIcon(icona.ICO(32))
-		systray.SetTitle("Intercom regia")
-		systray.SetTooltip("Intercom regia – tecnici: " + d.appURL)
+		systray.SetTitle("CHARLIE26 – Intercom Evoluto")
+		systray.SetTooltip("CHARLIE26 – Intercom Evoluto · tecnici: " + d.appURL)
 		openConsole := systray.AddMenuItem("Apri console di regia", "Apre la console nel browser")
 		openFolder := systray.AddMenuItem("Apri cartella dati", "Evento, certificati e registro")
 		systray.AddSeparator()

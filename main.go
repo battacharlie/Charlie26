@@ -1,4 +1,4 @@
-// Intercom di produzione via WebRTC.
+// CHARLIE26 – Intercom Evoluto: intercom di produzione via WebRTC.
 //
 // Si lancia sulla macchina di regia; i tecnici si collegano dal browser
 // dello smartphone inquadrando il QR code mostrato nella console.
@@ -68,7 +68,7 @@ func main() {
 	log.SetOutput(reg)
 	log.SetFlags(log.Ltime)
 
-	say("\n  INTERCOM REGIA %s\n  ─────────────────────────────\n", version)
+	say("\n  CHARLIE26 – Intercom Evoluto %s\n  Andrea Battaglioli – www.andreabattaglioli.it · ABit/s · Made in Bolognina\n  ─────────────────────────────\n", version)
 
 	ips := netinfo.Detect()
 	settingsPath := filepath.Join(*dataDir, "impostazioni.json")
@@ -329,10 +329,22 @@ func alreadyRunning(port int) bool {
 }
 
 func defaultDataDir() string {
-	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "IntercomRegia")
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "dati-charlie26"
 	}
-	return "dati-intercom"
+	dir := filepath.Join(d, "Charlie26")
+	// Le versioni precedenti usavano "IntercomRegia": la si riprende così com'è
+	// (evento, utenti e certificato già installato sui telefoni).
+	old := filepath.Join(d, "IntercomRegia")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err := os.Stat(old); err == nil {
+			if os.Rename(old, dir) != nil {
+				return old
+			}
+		}
+	}
+	return dir
 }
 
 func fileExists(p string) bool {

@@ -5,5 +5,5 @@ import "embed"
 
 // FS contiene pagine, script, stili e icone.
 //
-//go:embed *.html *.js *.css rnnoise/*.js avatars/*.svg
+//go:embed *.html *.js *.css *.json rnnoise/*.js avatars/*.svg brand/*.png
 var FS embed.FS
