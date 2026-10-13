@@ -57,7 +57,7 @@
     const nav = $('configTabs');
     nav.textContent = '';
     const cred = ev.mode === 'credenziali';
-    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['video', 'Video']]) {
+    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['video', 'Video'], ['registro', 'Registro']]) {
       nav.append(el('button', { class: tab === id ? 'sel' : '', onclick: () => { tab = id; try { localStorage.setItem('regia.tab', id); } catch (_) {} render(); } }, label));
     }
   }
@@ -66,7 +66,8 @@
     renderTabs();
     const body = $('configBody');
     body.textContent = '';
-    ({ evento: renderEvent, canali: renderChannels, utenti: renderUsers, video: renderVideo }[tab] || renderEvent)(body);
+    clearInterval(logTimer);
+    ({ evento: renderEvent, canali: renderChannels, utenti: renderUsers, video: renderVideo, registro: renderLog }[tab] || renderEvent)(body);
   }
 
   function renderEvent(body) {
@@ -114,6 +115,34 @@
       file));
     body.append(el('p', { class: 'small muted' }, 'Il file contiene canali, utenti e impostazioni (le password solo come impronta non leggibile). ' +
       'Usalo per preparare un evento in anticipo o riutilizzarlo come modello.'));
+
+    body.append(el('h2', {}, 'Programma'));
+    body.append(el('div', { class: 'row' }, el('button', {
+      class: 'mini danger',
+      onclick: async () => {
+        if (!confirm('Spegnere l\'intercom? Tutti i tecnici verranno scollegati.')) return;
+        await fetch('/api/regia/spegni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        document.body.innerHTML = '<div class="doc"><h1>Intercom spento</h1><p class="muted">Per riaccenderlo avvia di nuovo il programma.</p></div>';
+      },
+    }, '⏻ Spegni il programma'), el('span', { class: 'small muted' }, 'Su Windows si può spegnere anche dall\'icona vicino all\'orologio.')));
+  }
+
+  // Registro: i messaggi che prima comparivano nella finestra nera.
+  let logTimer = null;
+  function renderLog(body) {
+    const pre = el('pre', { class: 'log' });
+    body.append(el('p', { class: 'small muted' }, 'Messaggi del programma (gli stessi salvati nel file intercom.log della cartella dati).'), pre);
+    const refresh = async () => {
+      try {
+        const r = await fetch('/api/regia/registro');
+        const out = await r.json();
+        const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+        pre.textContent = (out.lines || []).join('\n');
+        if (atBottom) pre.scrollTop = pre.scrollHeight;
+      } catch (_) { /* server spento */ }
+    };
+    refresh();
+    logTimer = setInterval(refresh, 2000);
   }
 
   function renderVideo(body) {

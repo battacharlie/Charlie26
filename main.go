@@ -6,24 +6,27 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/battacharlie/charlie26/internal/certs"
 	"github.com/battacharlie/charlie26/internal/evento"
 	"github.com/battacharlie/charlie26/internal/netinfo"
+	"github.com/battacharlie/charlie26/internal/registro"
 	"github.com/battacharlie/charlie26/internal/server"
 	"github.com/battacharlie/charlie26/internal/sfu"
 	"github.com/battacharlie/charlie26/web"
@@ -46,9 +49,24 @@ func main() {
 		noBrowser = flag.Bool("no-browser", false, "non aprire automaticamente la console nel browser")
 	)
 	flag.Parse()
+
+	// Doppio clic con il programma già acceso: si apre la sua console e basta.
+	if alreadyRunning(*httpsPort) {
+		return
+	}
+
+	// Registro: finestra (se c'è), file intercom.log nella cartella dati e
+	// memoria (lo mostra la console di regia nella scheda Registro).
+	outs := []io.Writer{os.Stdout}
+	if f, err := registro.OpenFile(*dataDir); err == nil {
+		defer f.Close()
+		outs = append(outs, f)
+	}
+	reg = registro.New(500, outs...)
+	log.SetOutput(reg)
 	log.SetFlags(log.Ltime)
 
-	fmt.Printf("\n  INTERCOM REGIA %s\n  ─────────────────────────────\n", version)
+	say("\n  INTERCOM REGIA %s\n  ─────────────────────────────\n", version)
 
 	ips := netinfo.Detect()
 	host := *ipFlag
@@ -57,15 +75,15 @@ func main() {
 	}
 	if host == "" {
 		host = "127.0.0.1"
-		fmt.Println("  ⚠ Nessuna scheda di rete attiva: funziona solo su questo computer.")
+		say("  ⚠ Nessuna scheda di rete attiva: funziona solo su questo computer.\n")
 	}
-	fmt.Println("  Schede di rete trovate:")
+	say("  Schede di rete trovate:\n")
 	for _, a := range ips {
 		mark := " "
 		if a.IP == host {
 			mark = "►"
 		}
-		fmt.Printf("   %s %-15s  %s\n", mark, a.IP, a.Interface)
+		say("   %s %-15s  %s\n", mark, a.IP, a.Interface)
 	}
 
 	// Certificati HTTPS.
@@ -94,9 +112,9 @@ func main() {
 			host = strings.ReplaceAll(host, ".", "-") + "." + strings.TrimPrefix(*domain, "*.")
 		}
 		if err := pair.Leaf.VerifyHostname(host); err != nil {
-			fmt.Printf("  ⚠ Il certificato di dominio non copre %q: i telefoni vedranno un avviso.\n", host)
+			say("  ⚠ Il certificato di dominio non copre %q: i telefoni vedranno un avviso.\n", host)
 		}
-		fmt.Printf("  HTTPS: certificato di dominio (%s)\n", filepath.Base(customCert))
+		say("  HTTPS: certificato di dominio (%s)\n", filepath.Base(customCert))
 	} else {
 		hosts := make([]string, 0, len(ips)+1)
 		for _, a := range ips {
@@ -114,7 +132,7 @@ func main() {
 		}
 		tlsCert = local.Server
 		caPEM = local.CAPEM
-		fmt.Println("  HTTPS: CA locale (cartella " + certDir + ")")
+		say("  HTTPS: CA locale (cartella %s)\n", certDir)
 	}
 
 	// Evento: si riparte da quello salvato, altrimenti se ne crea uno nuovo.
@@ -122,7 +140,7 @@ func main() {
 	ev, err := evento.Load(eventPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Printf("  ⚠ %v: ne creo uno nuovo (il vecchio resta in evento.json.rotto)\n", err)
+			say("  ⚠ %v: ne creo uno nuovo (il vecchio resta in evento.json.rotto)\n", err)
 			_ = os.Rename(eventPath, eventPath+".rotto")
 		}
 		ev = evento.New(*mainName, strings.Split(*depts, ","))
@@ -136,9 +154,15 @@ func main() {
 		Save:    func(e *evento.Event) error { return e.Save(eventPath) },
 	})
 	if err != nil {
-		fatal("%v\n  Un altro programma (o un'altra copia di questo) usa già la porta. Prova con -porta-udp 8500.", err)
+		if alreadyRunning(*httpsPort) {
+			return
+		}
+		fatal("%v\nUn altro programma usa già la porta. Prova con l'opzione -porta-udp 8500.", err)
 	}
 	defer room.Close()
+
+	quit := make(chan struct{})
+	var quitOnce sync.Once
 
 	srv := server.New(server.Config{
 		Host:      host,
@@ -149,11 +173,16 @@ func main() {
 		Web:       web.FS,
 		Room:      room,
 		IPs:       ips,
+		Log:       reg.Lines,
+		Shutdown:  func() { quitOnce.Do(func() { close(quit) }) },
 	})
 
 	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
 	if err != nil {
-		fatal("porta HTTPS %d occupata: %v\n  Prova con -porta 9443.", *httpsPort, err)
+		if alreadyRunning(*httpsPort) {
+			return
+		}
+		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
 	}
 	hs := &http.Server{
 		Handler:           srv.HTTPSHandler(),
@@ -170,39 +199,58 @@ func main() {
 	if *httpPort > 0 {
 		hl, err := net.Listen("tcp", ":"+strconv.Itoa(*httpPort))
 		if err != nil {
-			fmt.Printf("  ⚠ Porta di aiuto %d occupata: pagina di aiuto in HTTP non disponibile.\n", *httpPort)
+			say("  ⚠ Porta di aiuto %d occupata: pagina di aiuto in HTTP non disponibile.\n", *httpPort)
 		} else {
 			go http.Serve(hl, srv.HTTPHandler())
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("  Console di regia:  " + srv.ConsoleURL())
-	fmt.Println("  App tecnici:       " + srv.AppURL())
+	say("\n  Console di regia:  %s\n", srv.ConsoleURL())
+	say("  App tecnici:       %s\n", srv.AppURL())
 	if *httpPort > 0 {
-		fmt.Println("  Aiuto certificato: " + srv.HelpURL())
+		say("  Aiuto certificato: %s\n", srv.HelpURL())
 	}
-	fmt.Printf("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
+	say("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
 	names := make([]string, len(ev.Channels))
 	for i, c := range ev.Channels {
 		names[i] = c.Name
 	}
 	mode := map[string]string{evento.ModeLibero: "libero accesso", evento.ModeCredenziali: "accesso con credenziali"}[ev.Mode]
-	fmt.Printf("  Evento %q, %s. Canali: %s\n", ev.Name, mode, strings.Join(names, ", "))
-	fmt.Println()
-	fmt.Println("  Se Windows chiede di consentire l'accesso alla rete, scegli")
-	fmt.Println("  \"Reti private\" e premi Consenti. Chiudi questa finestra per spegnere.")
-	fmt.Println()
+	say("  Evento %q, %s. Canali: %s\n\n", ev.Name, mode, strings.Join(names, ", "))
+	say("  Se Windows chiede di consentire l'accesso alla rete, scegli\n  \"Reti private\" e premi Consenti.\n")
+	say("%s\n\n", desktopHint)
 
 	if !*noBrowser {
 		openBrowser(srv.ConsoleURL())
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
-	fmt.Println("\n  Spegnimento…")
+	runDesktop(desktop{consoleURL: srv.ConsoleURL(), appURL: srv.AppURL(), dataDir: *dataDir, quit: quit})
+	say("\n  Spegnimento…\n")
 	_ = hs.Close()
+}
+
+// reg è il registro dei messaggi (finestra, file e console di regia).
+var reg = registro.New(500, os.Stdout)
+
+func say(format string, a ...any) { fmt.Fprintf(reg, format, a...) }
+
+// alreadyRunning: se un'altra copia del programma è già accesa su questa
+// porta, apre la sua console invece di dare errore (capita facendo doppio
+// clic due volte, soprattutto ora che su Windows non c'è la finestra).
+func alreadyRunning(port int) bool {
+	c := http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // solo verso localhost
+	resp, err := c.Get(fmt.Sprintf("https://localhost:%d/api/info", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var info struct{ AppURL string }
+	if json.NewDecoder(resp.Body).Decode(&info) != nil || info.AppURL == "" {
+		return false
+	}
+	say("  Il programma è già acceso: apro la sua console.\n")
+	openBrowser(fmt.Sprintf("https://localhost:%d/regia", port))
+	return true
 }
 
 func defaultDataDir() string {
@@ -218,11 +266,9 @@ func fileExists(p string) bool {
 }
 
 func fatal(format string, a ...any) {
-	fmt.Printf("\n  ERRORE: "+format+"\n\n", a...)
-	if runtime.GOOS == "windows" {
-		fmt.Println("  Premi Invio per chiudere.")
-		_, _ = fmt.Scanln()
-	}
+	msg := fmt.Sprintf(format, a...)
+	log.Print("ERRORE: " + msg)
+	showError(msg)
 	os.Exit(1)
 }
 

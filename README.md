@@ -29,7 +29,11 @@ Su GitHub apri **Actions → Compila**, poi l'esecuzione più recente, e in fond
 ### Primo avvio su Windows
 1. Doppio clic su `intercom-windows-amd64.exe`. Se compare "Windows ha protetto il PC", scegli **Ulteriori informazioni → Esegui comunque**.
 2. Al primo avvio Windows chiede se consentire l'accesso alla rete: spunta **Reti private** e premi **Consenti**. Senza questo passaggio i telefoni non si collegano.
-3. Si apre la finestra nera con gli indirizzi e, nel browser, la **console di regia**.
+3. Si apre nel browser la **console di regia**. Non compare nessuna finestra nera: il programma resta attivo come **icona vicino all'orologio** (un microfono bianco su un tondo rosso; se non la vedi, cercala sotto la freccetta ˄).
+   - **clic sinistro** sull'icona: riapre la console;
+   - **clic destro**: *Apri console di regia*, *Apri cartella dati*, *Esci (spegne l'intercom)*.
+4. Se fai di nuovo doppio clic sul programma già acceso, si apre semplicemente la sua console.
+5. Se qualcosa impedisce l'avvio (per esempio una porta occupata), compare una finestrella con la spiegazione.
 
 ### Primo avvio su Mac
 I file non sono firmati da Apple, quindi va fatto un passaggio in più:
@@ -48,6 +52,19 @@ I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 4. Scrivi il nome, premi **Entra** e rispondi **Consenti** al microfono.
 
 **Pulsante microfono:** un tocco breve lo apre e lo chiude. Se lo tieni premuto, parli finché non lo rilasci (push-to-talk).
+
+## Console di regia
+
+Si apre da sola all'avvio (`https://localhost:8443/regia`) ed è pensata per stare in uno schermo 16:9:
+- **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, anteprime video (dalla Fase 5);
+- **in alto a destra, Configurazione**, con le schede:
+  - *Evento*: nome, modalità di accesso, **Esporta / Importa configurazione** (un file `.json` da tenere come modello o preparare prima dell'evento), **Spegni il programma**;
+  - *Canali*, *Utenti*, *Video*;
+  - *Registro*: i messaggi del programma, salvati anche in `intercom.log` nella cartella dati;
+- **in basso a destra, Intercom**: tasti PARLA per canale, PARLA A TUTTI, lista dei collegati.
+
+## Avatar
+All'ingresso ognuno sceglie un avatar: uno dei quattro mostriciattoli (Bit, Byte, Pixel, Glitch) oppure una **foto** (📷). La foto viene ritagliata e ridotta sul telefono a pochi KB prima dell'invio. Si cambia anche da collegati, toccando il proprio avatar in alto.
 
 ## Modalità di accesso
 
@@ -103,7 +120,7 @@ Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
 
-Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro) e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
+Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`) e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
 ### Certificato di dominio (nessun avviso sui telefoni)
 Se hai un certificato valido per un dominio (es. wildcard `*.intercom.tuodominio.it`) e un DNS che risolve `192-168-1-10.intercom.tuodominio.it` su `192.168.1.10`:

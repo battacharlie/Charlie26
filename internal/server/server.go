@@ -32,6 +32,8 @@ type Config struct {
 	Web       fs.FS
 	Room      *sfu.Room
 	IPs       []netinfo.Address
+	Log       func() []string // ultime righe del registro (può essere nil)
+	Shutdown  func()          // spegne il programma (può essere nil)
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
@@ -82,6 +84,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/regia/evento", s.onlyRegia(s.handleEventChange))
 	mux.HandleFunc("GET /api/regia/esporta", s.onlyRegia(s.handleExport))
 	mux.HandleFunc("POST /api/regia/importa", s.onlyRegia(s.handleImport))
+	mux.HandleFunc("GET /api/regia/registro", s.onlyRegia(s.handleLog))
+	mux.HandleFunc("POST /api/regia/spegni", s.onlyRegia(s.handleShutdown))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
 	mux.HandleFunc("GET /static/rnnoise-worklet.js", s.handleRNNoise)

@@ -605,6 +605,43 @@ func TestRegiaAPI(t *testing.T) {
 	}
 }
 
+func TestLogAndShutdown(t *testing.T) {
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+	off := make(chan struct{})
+	srv := New(Config{Host: "127.0.0.1", HTTPSPort: 8443, Web: web.FS, Room: room,
+		Log:      func() []string { return []string{"riga uno", "riga due"} },
+		Shutdown: func() { close(off) },
+	})
+	ts := httptest.NewTLSServer(srv.HTTPSHandler())
+	defer ts.Close()
+	resp, err := ts.Client().Get(ts.URL + "/api/regia/registro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(b), "riga due") {
+		t.Fatalf("registro: %s", b)
+	}
+	// Spegnimento: solo con richiesta JSON (un sito esterno non può spegnere l'intercom).
+	resp, _ = ts.Client().Post(ts.URL+"/api/regia/spegni", "text/plain", strings.NewReader("{}"))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("spegnimento senza JSON: %d", resp.StatusCode)
+	}
+	resp, _ = ts.Client().Post(ts.URL+"/api/regia/spegni", "application/json", strings.NewReader("{}"))
+	resp.Body.Close()
+	select {
+	case <-off:
+	case <-time.After(3 * time.Second):
+		t.Fatal("lo spegnimento non è partito")
+	}
+}
+
 func TestPagesAndCA(t *testing.T) {
 	ts, _ := startServer(t, nil)
 	client := ts.Client()

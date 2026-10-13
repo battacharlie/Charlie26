@@ -99,6 +99,26 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.cfg.Room.Event())
 }
 
+func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
+	var lines []string
+	if s.cfg.Log != nil {
+		lines = s.cfg.Log()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Shutdown == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "non disponibile"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "spegnimento"})
+	go func() {
+		time.Sleep(300 * time.Millisecond) // lascia arrivare la risposta
+		s.cfg.Shutdown()
+	}()
+}
+
 func (s *Server) handleEventGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.cfg.Room.Event())
 }
