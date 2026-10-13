@@ -55,13 +55,14 @@ Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo
 
 **Versioni ufficiali**: nella pagina del progetto su GitHub, sezione **Releases** (a destra), scarica il file per il tuo sistema. Ogni release contiene anche `SHA256SUMS.txt` per verificare i file.
 
-**Ultima versione in sviluppo**: **Actions → Compila**, l'esecuzione più recente, in fondo **intercom**. Dentro trovi:
+**Ultima versione in sviluppo**: **Actions → Compila**, l'esecuzione più recente, in fondo **charlie26**. Dentro trovi:
 
 | File | Per |
 |---|---|
 | `charlie26-windows-amd64.exe` | Windows 10/11 |
 | `charlie26-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
 | `charlie26-darwin-amd64` | Mac con processore Intel |
+| `charlie26-android.apk` | App per telefoni Android (facoltativa: il browser basta) |
 
 ### Primo avvio su Windows
 1. Doppio clic su `charlie26-windows-amd64.exe`. Se compare "Windows ha protetto il PC", scegli **Ulteriori informazioni → Esegui comunque**.
@@ -95,12 +96,46 @@ I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 Si apre da sola all'avvio (`https://localhost:8443/regia`) ed è pensata per stare in uno schermo 16:9:
 - **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, **rete usata nei QR** (se il PC ha più schede di rete, si sceglie qui; la scelta viene ricordata), **anteprime video** (qualità bassa, massimo 15 fps; clic = grande in qualità alta);
 - **in alto a destra, Configurazione**, con le schede:
-  - *Evento*: nome, modalità di accesso, **modelli di evento** (salva la configurazione con un nome, ricaricala con un clic), **Esporta / Importa** su file `.json` (per prepararla su un altro computer), **Spegni il programma**;
+  - *Evento*: nome, modalità di accesso, **telefoni di regia abbinati** (vedi sotto), **modelli di evento** (salva la configurazione con un nome, ricaricala con un clic);
   - *Canali*, *Utenti*;
   - *Video*: invio di periferiche del browser, indirizzo e chiave per OBS, richieste da approvare (vedi sotto);
   - *QR*: QR generale, **QR per canale** (libero accesso: l'app propone già quel canale) o **QR personale per utente** (credenziali: si entra senza password), ognuno scaricabile in PNG; **Stampa / salva PDF** apre un foglio A4 con le schede da ritagliare;
   - *Registro*: i messaggi del programma, salvati anche in `intercom.log` nella cartella dati;
 - **in basso a destra, Intercom**: tasti PARLA per canale, PARLA A TUTTI, lista dei collegati.
+- **in alto, accanto alle schede**: **📱 Abbina telefono**, **Esporta / Importa** la configurazione su file `.json`, **Spegni** (chiude il programma e solo la scheda della console).
+- I bordi tra i riquadri si **trascinano** per cambiarne le misure (doppio clic: misure originali).
+
+## Regia da smartphone
+
+La console sul PC resta sempre attiva; in più puoi **abbinare uno o più telefoni come regia** (un secondo responsabile di produzione, con tutti i comandi).
+
+1. Nella console premi **📱 Abbina telefono**: compare un QR.
+2. Inquadralo con la fotocamera del telefono (o con l'app CHARLIE26) e dai un nome al telefono.
+3. Il telefono mostra la console: in alto i pulsanti **🎙 Intercom, Evento, Canali, Utenti, QR, Video, Registro**, e il menu **☰** con *Esporta*, *Importa*, *Abbina un altro telefono*, *Termina evento* (spegne CHARLIE26 per tutti) e *Esci / Chiudi app*.
+
+Il QR vale **5 minuti e una sola volta**. L'abbinamento resta anche se il programma si riavvia; in *Evento → Regia da smartphone* vedi i telefoni abbinati e puoi **revocarli** (il telefono perde subito i comandi).
+
+## Pop-up: l'intercom sopra le altre app
+
+Il pulsante **⧉** in alto (telefoni e console) apre una **finestrella** che resta sopra le altre app:
+- con il **video** della regia, se c'è;
+- altrimenti con un riquadro: canali, **chi sta parlando**, **MUTO / IN ONDA**.
+
+Nella finestrella i tasti **▶ = parla** e **⏸ = muto** (non si può tenere premuto: è un tocco per aprire e uno per chiudere; sui canali "solo push-to-talk" il pop-up non apre il microfono). Dal **browser** il pop-up funziona su Chrome per Android e per computer e su Safari; su iPhone si apre anche da solo uscendo da Safari mentre il riquadro è attivo. Nell'**app Android** si apre **da solo** quando passi a un'altra app.
+
+## App Android
+
+Facoltativa: tutto funziona anche dal browser. In più l'app:
+- si apre con la **fotocamera** per leggere il QR (tecnici, caporeparto o **📱 abbinamento regia**) e ricorda gli eventi recenti (**Riapri**);
+- si fida **solo** del certificato dell'evento indicato dal QR (nessun avviso "connessione non privata" e nessun rischio che un altro dispositivo si spacci per la regia);
+- resta attiva con l'**app in secondo piano**: notifica fissa con stato e tasto **Parla / Muto**, e **pop-up automatico** con video e tasto parla;
+- salva l'esportazione della configurazione nella cartella **Download**.
+
+**Installazione**: scarica `charlie26-android.apk` sul telefono (dalla release o dal tab Actions), aprilo e consenti *Installa app sconosciute* per il browser o per l'app File. Richiede Android 10 o successivo. Al primo uso consenti **fotocamera**, **microfono** e **notifiche**.
+
+**Firma dell'app**: per installare gli aggiornamenti sopra la versione precedente l'APK va firmato sempre con la stessa chiave. Finché la chiave non è configurata nei *Secrets* di GitHub (`ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`) la compilazione produce un APK di prova: per aggiornarlo va prima disinstallata la versione vecchia (e il telefono di regia va riabbinato).
+
+**iPhone**: il progetto è pronto per aggiungere iOS con lo stesso codice (Capacitor); per installarla servono un account Apple Developer e un Mac per la firma.
 
 ## Video
 
@@ -201,12 +236,15 @@ go run .                            # avvia in locale
 go run ./tools/winres -version 1.0.0  # icona e versione per l'eseguibile Windows
 ```
 
-**Pubblicare una release**: su GitHub *Releases → Draft a new release*, crea un tag `vX.Y.Z` (es. `v1.0.0`) e pubblica. La compilazione automatica allega da sola i file per Windows e Mac.
+**App Android** (cartella `mobile/`, Capacitor): `npm ci && npm run prepare-www && npx cap sync android`, poi `cd android && ./gradlew assembleDebug` (serve l'Android SDK). La pagina iniziale con il lettore QR è in `mobile/www/`; la parte nativa (certificato dell'evento, servizio in secondo piano, pop-up) in `mobile/android/app/src/main/java/`.
+
+**Pubblicare una release**: scrivi il nuovo numero nel file `VERSION` (es. `1.2.0`) e porta le modifiche su `main`: la compilazione automatica crea da sola la release `v1.2.0` con i file per Windows, Mac e Android. In alternativa, su GitHub *Releases → Draft a new release* con un nuovo tag `vX.Y.Z`.
 
 ## Licenze di terze parti
 
 - [RNNoise](https://github.com/xiph/rnnoise) (BSD 3 clausole), nella build WebAssembly [`@jitsi/rnnoise-wasm`](https://github.com/jitsi/rnnoise-wasm) (Apache 2.0): vedi `web/rnnoise/`.
 - [Pion WebRTC](https://github.com/pion/webrtc) (MIT), [gorilla/websocket](https://github.com/gorilla/websocket) (BSD), [go-qrcode](https://github.com/skip2/go-qrcode) (MIT).
+- App: [Capacitor](https://capacitorjs.com) (MIT), [jsQR](https://github.com/cozmo/jsQR) (Apache 2.0).
 
 ## Credits
 

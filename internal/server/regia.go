@@ -13,10 +13,11 @@ import (
 	"github.com/battacharlie/charlie26/internal/evento"
 )
 
-// onlyRegia limita un'azione alla macchina di regia (connessioni da localhost).
+// onlyRegia limita un'azione alla macchina di regia (connessioni da localhost)
+// e ai telefoni abbinati come regia.
 func (s *Server) onlyRegia(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !isLoopback(r.RemoteAddr) {
+		if !s.isRegia(r) {
 			http.Error(w, "disponibile solo sul computer di regia", http.StatusForbidden)
 			return
 		}

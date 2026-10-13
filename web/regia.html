@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-role="regia">
+  <!-- Smartphone: le schermate come pulsanti in alto, più il menu -->
+  <nav class="mbar" id="mbar" aria-label="Schermate della regia"></nav>
   <div class="desk">
     <!-- Colonna sinistra: QR e anteprime video -->
     <aside class="card side">
@@ -20,6 +22,7 @@
         <h1 class="console-title">Console di regia</h1>
         <span class="muted small" title="Versione">{{VERSION}}</span>
       </div>
+      <div class="side-qr">
       <div class="qr-pair">
         <figure>
           <img class="qr" id="qrApp" src="/qr/app.png" alt="QR code dell'app tecnici">
@@ -37,10 +40,13 @@
           <button class="mini" id="netRefresh" title="Cerca di nuovo le schede di rete">↻</button>
         </div>
       </div>
+      </div>
+      <div class="side-video">
       <h2>Anteprime video</h2>
       <!-- Fase 5: un riquadro per ogni segnale inviato, aggiornato al massimo a 15 fps. -->
       <div class="previews" id="previews">
         <div class="preview-empty">Nessun segnale video.<br><span class="small">Qui compaiono le anteprime dei video inviati ai canali (massimo 15 fps). Clic per vederli grandi.</span></div>
+      </div>
       </div>
       <p class="credits">CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – <a href="https://www.andreabattaglioli.it" target="_blank" rel="noopener">www.andreabattaglioli.it</a> · ABit/s · Made in Bolognina</p>
     </aside>
@@ -79,6 +85,7 @@
             <span class="me" id="meLabel"></span>
             <span class="small muted keys">Clic = apri/chiudi · tieni premuto = parla · <kbd>1</kbd>…<kbd>9</kbd> canali · <kbd>Spazio</kbd> tutti</span>
             <span class="status" id="connText">connessione…</span>
+            <button class="pipbtn" id="pipBtn" title="Pop-up: resta sopra le altre app con video e microfono">⧉</button>
           </div>
           <div class="banner hidden" id="talkBanner"></div>
           <div class="channels" id="channelList"></div>
@@ -94,6 +101,7 @@
   <script>
     if ('{{CERT_MODE}}' !== 'locale') document.getElementById('helpBox').style.display = 'none';
   </script>
+  <script src="/static/abbina.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/admin.js"></script>
 </body>

@@ -30,14 +30,105 @@
     notify.t = setTimeout(() => b.classList.add('hidden'), isError ? 8000 : 2500);
   }
 
+  let isRemote = false; // questo è un telefono abbinato (non il PC di regia)
+
   async function load() {
+    if (window.regiaPairing) return; // abbinamento in corso: la pagina si ricarica
     const r = await fetch('/api/regia/evento');
     if (!r.ok) {
-      root.textContent = 'La configurazione è disponibile solo sul computer di regia.';
+      notPaired();
       return;
     }
     ev = await r.json();
     render();
+    loadDevices();
+  }
+
+  // Telefono non abbinato: spiega come fare invece di mostrare una console vuota.
+  function notPaired() {
+    document.body.classList.add('unpaired');
+    document.body.innerHTML = '';
+    document.body.append(el('div', { class: 'doc' },
+      el('div', { class: 'brand big' }, el('img', { src: '/static/brand/icon-192.png', alt: '' }),
+        el('div', {}, el('span', { class: 'word' }, 'CHARLIE', el('b', {}, '26')), el('span', { class: 'tag' }, 'INTERCOM EVOLUTO'))),
+      el('h1', {}, 'Regia da smartphone'),
+      el('p', {}, 'Questo telefono non è ancora abbinato come regia.'),
+      el('ol', {},
+        el('li', {}, 'Sul computer di regia, nella console, premi ', el('b', {}, '📱 Abbina telefono'), '.'),
+        el('li', {}, 'Inquadra il QR che compare con la fotocamera (o con l\'app CHARLIE26).'),
+        el('li', {}, 'Il telefono diventa una seconda regia, con gli stessi comandi del computer.')),
+      el('p', { class: 'muted small' }, 'Il codice vale 5 minuti e una sola volta. Dalla console puoi revocare l\'abbinamento quando vuoi.'),
+      el('p', {}, el('a', { class: 'btn', href: '/' }, 'Entra invece come tecnico')),
+      window.charlieApp ? el('p', {}, el('button', { class: 'linkbtn', onclick: () => window.charlieApp.home() }, '↩ Torna alla scansione del QR')) : null));
+  }
+
+  // ---------- Telefoni abbinati come regia ----------
+  let devices = [];
+  async function loadDevices() {
+    try {
+      const r = await fetch('/api/regia/dispositivi');
+      if (!r.ok) return;
+      devices = await r.json();
+      isRemote = devices.some((d) => d.io);
+      document.body.classList.toggle('remote', isRemote);
+      buildMobileBar();
+      if (tab === 'evento') render();
+    } catch (_) {}
+  }
+
+  async function revokeDevice(d) {
+    const msg = d.io ? 'Scollegare questo telefono dalla regia? Per tornare regia servirà un nuovo QR dalla console.' : 'Revocare "' + d.nome + '"? Il telefono perde subito i comandi di regia.';
+    if (!confirm(msg)) return;
+    const r = await fetch('/api/regia/dispositivi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'revoca', id: d.id }) });
+    if (d.io) { location.reload(); return; }
+    if (!r.ok) { notify('Revoca non riuscita', true); return; }
+    notify('"' + d.nome + '" non è più regia');
+    loadDevices();
+  }
+
+  // Finestra con il QR di abbinamento: si chiude da sola quando il telefono è abbinato.
+  async function pairDialog() {
+    const r = await fetch('/api/regia/abbina', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const out = await r.json();
+    if (!r.ok) { notify(out.error || 'Abbinamento non disponibile', true); return; }
+    const before = new Set(devices.map((d) => d.id));
+    const left = el('span', {});
+    const dlg = el('dialog', { class: 'pair-dialog' },
+      el('h2', {}, '📱 Abbina un telefono come regia'),
+      el('p', { class: 'small' }, 'Inquadra il QR con la fotocamera del telefono (o con l\'app CHARLIE26). Il telefono avrà gli stessi comandi della regia; questa console resta attiva.'),
+      el('img', { class: 'qr', src: '/qr/abbina.png?codice=' + out.codice, alt: 'QR di abbinamento' }),
+      el('p', { class: 'small muted' }, 'Vale una sola volta · scade tra ', left),
+      el('div', { class: 'row' }, el('button', { class: 'mini', onclick: () => dlg.close() }, 'Chiudi')));
+    document.body.append(dlg);
+    dlg.showModal();
+    const exp = new Date(out.scade).getTime();
+    const tick = setInterval(async () => {
+      const s = Math.max(0, Math.round((exp - Date.now()) / 1000));
+      left.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      if (s === 0) { dlg.close(); notify('Codice di abbinamento scaduto', true); }
+      if (s % 2 === 0) {
+        await loadDevices();
+        const nuovo = devices.find((d) => !before.has(d.id));
+        if (nuovo && dlg.open) { dlg.close(); notify('"' + nuovo.nome + '" ora è regia'); }
+      }
+    }, 1000);
+    left.textContent = '5:00';
+    dlg.addEventListener('close', () => { clearInterval(tick); dlg.remove(); });
+  }
+
+  function renderDevices(body) {
+    body.append(el('h2', {}, 'Regia da smartphone'));
+    body.append(el('p', { class: 'small muted' }, 'Ogni telefono abbinato ha gli stessi comandi della regia (anche più di uno insieme). Questa console resta sempre attiva.'));
+    const list = el('div', { class: 'devices' });
+    for (const d of devices) {
+      const seen = new Date(d.visto);
+      list.append(el('div', { class: 'row device' },
+        el('span', {}, '📱 ', el('b', {}, d.nome), d.io ? el('span', { class: 'tag-me' }, 'questo telefono') : null),
+        el('span', { class: 'small muted' }, 'visto ' + seen.toLocaleDateString('it-IT') + ' ' + seen.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })),
+        el('button', { class: 'mini danger', onclick: () => revokeDevice(d) }, d.io ? 'Scollega' : 'Revoca')));
+    }
+    if (!devices.length) list.append(el('p', { class: 'small muted' }, 'Nessun telefono abbinato.'));
+    body.append(list, el('div', { class: 'row' }, el('button', { class: 'mini primary', onclick: pairDialog }, '📱 Abbina telefono')));
   }
 
   async function postLook(change, okText) {
@@ -63,8 +154,10 @@
   }
 
   // Importa / esporta: sempre a portata nella riga delle schede.
+  let importFile = null;
   function setupFileActions() {
     const file = el('input', { type: 'file', accept: '.json,application/json', class: 'hidden' });
+    importFile = file;
     file.addEventListener('change', async () => {
       const f = file.files[0];
       file.value = '';
@@ -79,6 +172,7 @@
     });
     const tip = 'Il file contiene canali, utenti e impostazioni (le password solo come impronta non leggibile). Usalo per preparare un evento in anticipo o riutilizzarlo come modello.';
     $('configActions').append(
+      el('button', { class: 'mini', onclick: pairDialog, title: 'Abbina uno smartphone come seconda regia' }, '📱 Abbina telefono'),
       el('a', { class: 'mini primary', href: '/api/regia/esporta', download: '', title: tip }, '⬇ Esporta'),
       el('button', { class: 'mini', onclick: () => file.click(), title: tip }, '⬆ Importa…'),
       file,
@@ -87,27 +181,111 @@
 
   // Spegne il programma e chiude solo questa scheda del browser.
   async function shutdown() {
-    if (!confirm('Spegnere CHARLIE26? Tutti i tecnici verranno scollegati e questa scheda si chiuderà.')) return;
+    if (!confirm('Terminare l\'evento e spegnere CHARLIE26? Tutti i tecnici (e gli altri telefoni di regia) verranno scollegati.')) return;
     try {
       await fetch('/api/regia/spegni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     } catch (_) {}
     document.body.innerHTML = '<div class="doc"><h1>CHARLIE26 spento</h1><p class="muted">Puoi chiudere questa scheda. Per riaccenderlo avvia di nuovo il programma.</p></div>';
+    if (window.charlieApp) { setTimeout(() => window.charlieApp.exitApp(), 800); return; }
     // I browser permettono a una pagina di chiudere la propria scheda solo se è stata
     // aperta dal programma (o da uno script); altrimenti resta il messaggio qui sopra.
     window.close();
   }
 
+  function tabList() {
+    const cred = ev && ev.mode === 'credenziali';
+    return [['evento', 'Evento'], ['canali', 'Canali' + (ev ? ' (' + ev.channels.length + ')' : '')], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['qr', 'QR'], ['video', 'Video'], ['registro', 'Registro']];
+  }
+
+  function selectTab(id) {
+    tab = id;
+    try { localStorage.setItem('regia.tab', id); } catch (_) {}
+    if (ev) render();
+  }
+
   function renderTabs() {
     const nav = $('configTabs');
     nav.textContent = '';
-    const cred = ev.mode === 'credenziali';
-    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['qr', 'QR'], ['video', 'Video'], ['registro', 'Registro']]) {
-      nav.append(el('button', { class: tab === id ? 'sel' : '', onclick: () => { tab = id; try { localStorage.setItem('regia.tab', id); } catch (_) {} render(); } }, label));
+    for (const [id, label] of tabList()) {
+      nav.append(el('button', { class: tab === id ? 'sel' : '', onclick: () => selectTab(id) }, label));
     }
   }
 
+  // ---------- Smartphone: schermate come pulsanti in alto + menu ----------
+  const mobileQuery = window.matchMedia('(max-width: 760px), (max-height: 520px) and (pointer: coarse)');
+  let mview = 'intercom';
+  try { mview = localStorage.getItem('regia.mview') || 'intercom'; } catch (_) {}
+
+  function setMobileView(v) {
+    mview = v;
+    try { localStorage.setItem('regia.mview', v); } catch (_) {}
+    document.body.dataset.mview = v;
+    if (v !== 'intercom' && tab !== v) selectTab(v);
+    buildMobileBar();
+    window.scrollTo(0, 0);
+  }
+
+  function buildMobileBar() {
+    const bar = $('mbar');
+    if (!bar) return;
+    document.body.classList.toggle('mobile', mobileQuery.matches);
+    document.body.dataset.mview = mview;
+    bar.textContent = '';
+    const row = el('div', { class: 'mbar-tabs' });
+    for (const [id, label] of [['intercom', '🎙 Intercom'], ...tabList()]) {
+      row.append(el('button', { class: mview === id ? 'sel' : '', onclick: () => setMobileView(id) }, label));
+    }
+    const menuBtn = el('button', { class: 'mbar-menu', 'aria-label': 'Menu', title: 'Menu' }, '☰');
+    menuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+    bar.append(row, menuBtn);
+    const sel = row.querySelector('.sel');
+    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
+  function toggleMenu() {
+    const old = document.querySelector('.mmenu');
+    if (old) { old.remove(); return; }
+    const item = (label, fn, cls) => el('button', { class: cls || '', onclick: () => { menu.remove(); fn(); } }, label);
+    const menu = el('div', { class: 'mmenu', role: 'menu' },
+      item('⬇ Esporta configurazione', exportConfig),
+      item('⬆ Importa configurazione…', () => importFile.click()),
+      item('📱 Abbina un altro telefono', pairDialog),
+      el('hr'),
+      item('⏹ Termina evento (spegne CHARLIE26)', shutdown, 'danger'),
+      item(window.charlieApp ? '✕ Chiudi app' : '✕ Esci dalla regia', closeApp));
+    document.body.append(menu);
+    setTimeout(() => document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.remove(); }, { once: true }), 0);
+  }
+
+  // Esporta: link diretto sul PC; sul telefono (e nell'app) passa da un file scaricato.
+  async function exportConfig() {
+    const r = await fetch('/api/regia/esporta');
+    if (!r.ok) { notify('Esportazione non riuscita', true); return; }
+    const blob = await r.blob();
+    const name = (/filename="?([^";]+)/.exec(r.headers.get('Content-Disposition') || '') || [])[1] || 'evento.json';
+    if (window.charlieApp && window.charlieApp.saveFile) {
+      window.charlieApp.saveFile(name, await blob.text());
+      return;
+    }
+    const a = el('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // Chiudi: lascia il pannello senza spegnere niente per gli altri.
+  function closeApp() {
+    if (window.intercomLeave) window.intercomLeave();
+    if (window.charlieApp) { window.charlieApp.exitApp(); return; }
+    document.body.innerHTML = '<div class="doc"><h1>Uscito dalla regia</h1><p class="muted">CHARLIE26 resta acceso per tutti. Puoi chiudere questa scheda.</p><p><a class="btn" href="/regia">Rientra</a></p></div>';
+    window.close();
+  }
+
+  mobileQuery.addEventListener('change', buildMobileBar);
+
   function render() {
     renderTabs();
+    buildMobileBar();
     const body = $('configBody');
     body.textContent = '';
     clearInterval(logTimer);
@@ -152,6 +330,8 @@
       el('span', { class: 'small muted' }, 'Vale per la pagina di accesso e per chi non ha uno sfondo del proprio canale.')));
 
     // Modelli salvati sul computer di regia
+    renderDevices(body);
+
     body.append(el('h2', {}, 'Modelli di evento'));
     const modelName = el('input', { type: 'text', placeholder: 'Nome del modello (es. Concerto piazza)', maxlength: '60', value: ev.name });
     const models = el('div', { class: 'models' });
@@ -500,5 +680,6 @@
 
   setupSplitters();
   setupFileActions();
+  buildMobileBar();
   load();
 })();

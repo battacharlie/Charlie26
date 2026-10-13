@@ -418,3 +418,66 @@ a.brand { color: inherit; text-decoration: none; }
 .sign:hover, .sign:active { opacity: 1; text-decoration: underline; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .console-title { font-size: .95rem; color: var(--muted); font-weight: 600; margin: .3rem 0 0; }
+
+/* ---------- Regia da smartphone ---------- */
+.side-video { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.mbar { display: none; }
+.pair-dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 1.2rem; max-width: min(420px, calc(100vw - 32px)); text-align: center; }
+.pair-dialog::backdrop { background: rgba(0, 0, 0, .7); }
+.pair-dialog h2 { margin-top: 0; }
+.pair-dialog .qr { width: min(300px, 70vw); border-radius: 10px; padding: 8px; background: #fff; }
+.pair-dialog .row { justify-content: center; }
+.devices .device { justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: .4rem; }
+.tag-me { margin-left: .4rem; font-size: .7rem; padding: .1rem .4rem; border-radius: 6px; background: var(--accent-soft); color: var(--text); }
+.mmenu { position: fixed; z-index: 50; top: 52px; right: 8px; min-width: 250px; max-width: calc(100vw - 16px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: .3rem; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); display: flex; flex-direction: column; }
+.mmenu button { text-align: left; background: none; border: 0; color: var(--text); padding: .75rem .8rem; border-radius: 8px; font-size: .95rem; cursor: pointer; }
+.mmenu button:hover, .mmenu button:active { background: var(--accent-soft); }
+.mmenu button.danger { color: #ff8a80; }
+.mmenu hr { border: 0; border-top: 1px solid var(--line); margin: .2rem .4rem; width: auto; }
+body.mobile { overflow: auto; }
+body.mobile .mbar {
+  display: flex; align-items: center; gap: .3rem; position: sticky; top: 0; z-index: 40;
+  background: var(--bg); border-bottom: 1px solid var(--line); padding: 6px 6px 6px 8px;
+}
+body.mobile .mbar-tabs { display: flex; gap: .3rem; overflow-x: auto; flex: 1; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+body.mobile .mbar-tabs::-webkit-scrollbar { display: none; }
+body.mobile .mbar-tabs button { flex: none; border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 10px; padding: .55rem .8rem; font-size: .9rem; cursor: pointer; white-space: nowrap; }
+body.mobile .mbar-tabs button.sel { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+body.mobile .mbar-menu { flex: none; width: 42px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 1.3rem; cursor: pointer; }
+body.mobile .desk { display: block; height: auto; padding: 8px; }
+body.mobile .desk > .card { display: none; overflow: visible; padding: 12px; margin-bottom: 8px; }
+body.mobile .splitter { display: none; }
+body.mobile .config-head { display: none; }
+body.mobile .config-body { overflow: visible; margin-top: 0; }
+body.mobile[data-mview=intercom] .desk > .intercom { display: block; }
+body.mobile:not([data-mview=intercom]) .desk > .config { display: flex; }
+body.mobile[data-mview=qr] .desk > .side, body.mobile[data-mview=video] .desk > .side { display: flex; }
+body.mobile .side .side-head, body.mobile .side .credits { display: none; }
+body.mobile[data-mview=qr] .side-video, body.mobile[data-mview=video] .side-qr { display: none; }
+body.mobile[data-mview=qr] .qr-pair { max-width: 420px; }
+body.mobile .side h2 { margin-top: 0; }
+body.mobile[data-mview=intercom] .talk { min-height: calc(100vh - 90px); }
+body.mobile .intercom .join .row { flex-direction: column; }
+body.mobile .config .modes { grid-template-columns: 1fr; }
+body.mobile .talk .keys { display: none; }
+body.mobile[data-role=regia] .mic-area { width: 100%; margin: .6rem 0 0; }
+body.mobile .config table, body.mobile .config tbody { display: block; }
+body.mobile .config thead { display: none; }
+body.mobile .config tr { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+body.mobile .config td { display: block; border: 0; padding: 0; }
+body.mobile .config td:has(> input[type=text]), body.mobile .config td:has(> input[type=password]) { flex: 1 1 55%; }
+body.mobile .config td > input[type=text], body.mobile .config td > input[type=password] { width: 100%; }
+body.mobile[data-role=regia] .talk { display: flex; flex-direction: column; gap: .4rem; }
+body.mobile[data-role=regia] .talk .switch { order: 4; }
+body.mobile[data-role=regia] .mic-area { order: 5; }
+body.mobile[data-role=regia] .people { order: 6; }
+body.mobile .config tr:has(> th) { display: none; }
+
+/* ---------- Pop-up (Picture-in-Picture) ---------- */
+.pip-src { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+.pipbtn { flex: none; border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 8px; padding: .25rem .55rem; font-size: 1rem; cursor: pointer; }
+.pipbtn.on { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+/* App Android: nel pop-up nativo si vede solo il video o il riquadro di stato */
+body.app-pip .pip-src { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 1; z-index: 1000; background: #000; object-fit: contain; }
+body.app-pip { overflow: hidden; }
+.linkbtn { display: block; margin: 1rem auto 0; background: none; border: 0; color: var(--muted); font-size: .9rem; text-decoration: underline; cursor: pointer; }
