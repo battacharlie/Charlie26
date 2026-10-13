@@ -40,13 +40,19 @@
 
       <!-- Accesso con credenziali -->
       <div id="loginForm" class="hidden">
-        <p class="muted">Accedi con il nome utente e la password che ti ha dato la regia.</p>
-        <label class="field">Nome utente
-          <input type="text" id="userInput" autocomplete="username" autocapitalize="off" autocorrect="off">
-        </label>
-        <label class="field">Password
-          <input type="password" id="userPassword" autocomplete="current-password">
-        </label>
+        <div id="keyLogin" class="hidden">
+          <p class="hello">Ciao <b id="keyName"></b>! Premi <b>Entra</b> e rispondi <b>Consenti</b> alla richiesta del microfono.</p>
+          <p class="small"><a href="#" id="otherUser">Non sei tu? Accedi con nome utente e password</a></p>
+        </div>
+        <div id="loginFields">
+          <p class="muted">Accedi con il nome utente e la password che ti ha dato la regia.</p>
+          <label class="field">Nome utente
+            <input type="text" id="userInput" autocomplete="username" autocapitalize="off" autocorrect="off">
+          </label>
+          <label class="field">Password
+            <input type="password" id="userPassword" autocomplete="current-password">
+          </label>
+        </div>
       </div>
 
       <div class="field">

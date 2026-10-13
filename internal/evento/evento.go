@@ -5,6 +5,7 @@ package evento
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,9 @@ type User struct {
 	PasswordHash string   `json:"passwordHash"`
 	Role         string   `json:"role"`
 	Channels     []string `json:"channels"`
+	// QRKey è la chiave di accesso diretto contenuta nel QR personale
+	// (alternativa a utente e password). Rigenerabile dalla regia.
+	QRKey string `json:"qrKey,omitempty"`
 }
 
 // Event è la configurazione completa.
@@ -267,6 +271,9 @@ func (e *Event) SetUser(u User, password string) error {
 		return errors.New("serve una password per il nuovo utente")
 	}
 	if existing != nil {
+		if u.QRKey == "" {
+			u.QRKey = existing.QRKey
+		}
 		*existing = u
 	} else {
 		e.Users = append(e.Users, u)
@@ -292,6 +299,19 @@ func (e *Event) Authenticate(username, password string) (*User, bool) {
 		return nil, false
 	}
 	return u, true
+}
+
+// UserByKey trova l'utente con questa chiave di accesso diretto.
+func (e *Event) UserByKey(key string) *User {
+	if len(key) < 32 {
+		return nil
+	}
+	for i := range e.Users {
+		if e.Users[i].QRKey != "" && subtle.ConstantTimeCompare([]byte(e.Users[i].QRKey), []byte(key)) == 1 {
+			return &e.Users[i]
+		}
+	}
+	return nil
 }
 
 // HashPassword calcola l'impronta bcrypt di una password.

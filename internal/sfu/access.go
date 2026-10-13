@@ -241,6 +241,40 @@ func (r *Room) Login(username, password string) (string, error) {
 	return token, nil
 }
 
+// LoginKey accede con la chiave del QR personale. Restituisce il gettone di
+// sessione e il nome mostrato dell'utente.
+func (r *Room) LoginKey(key string) (string, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.event.Mode != evento.ModeCredenziali {
+		return "", "", errors.New("l'evento è in libero accesso")
+	}
+	u := r.event.UserByKey(key)
+	if u == nil {
+		return "", "", errors.New("QR non più valido: chiedine uno nuovo alla regia")
+	}
+	token, _ := evento.NewToken()
+	r.sessions[token] = u.Username
+	return token, u.Name, nil
+}
+
+// UserQRKey restituisce la chiave del QR personale di un utente, creandola
+// se non esiste (o sostituendola se renew è vero: i QR vecchi smettono di
+// funzionare).
+func (r *Room) UserQRKey(username string, renew bool) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u := r.event.User(username)
+	if u == nil {
+		return "", errors.New("utente inesistente")
+	}
+	if u.QRKey == "" || renew {
+		u.QRKey, _ = evento.NewToken()
+		r.saveLocked()
+	}
+	return u.QRKey, nil
+}
+
 // ---------- Poteri di responsabile e regia ----------
 
 // Control: il responsabile apre (open=true) o chiude il microfono di un
@@ -401,6 +435,7 @@ func (r *Room) Event() *evento.Event {
 	e := r.event.Clone()
 	for i := range e.Users {
 		e.Users[i].PasswordHash = ""
+		e.Users[i].QRKey = ""
 	}
 	for i := range e.Channels {
 		e.Channels[i].OwnerHashes = nil

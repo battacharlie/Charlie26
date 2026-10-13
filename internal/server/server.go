@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +112,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/regia/rete", s.onlyRegia(s.handleNetSet))
 	mux.HandleFunc("POST /api/regia/spegni", s.onlyRegia(s.handleShutdown))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
+	mux.HandleFunc("GET /regia/qr", s.onlyRegia(s.page("qr.html")))
+	mux.HandleFunc("GET /qr/utente/{user}", s.onlyRegia(s.handleUserQR))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
 	mux.HandleFunc("GET /static/rnnoise-worklet.js", s.handleRNNoise)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.cfg.Web)))
@@ -173,12 +176,46 @@ func (s *Server) handleQR(w http.ResponseWriter, r *http.Request) {
 	switch r.PathValue("name") {
 	case "app.png":
 		text = s.AppURL()
+		// QR di un canale (libero accesso): la pagina lo propone già scelto.
+		if ch := r.URL.Query().Get("canale"); ch != "" {
+			if !s.channelExists(ch) {
+				http.NotFound(w, r)
+				return
+			}
+			text += "?canale=" + url.QueryEscape(ch)
+		}
 	case "aiuto.png":
 		text = s.HelpURL()
 	default:
 		http.NotFound(w, r)
 		return
 	}
+	writeQR(w, text)
+}
+
+// handleUserQR: QR personale con accesso diretto (solo dalla regia: contiene
+// la chiave dell'utente).
+func (s *Server) handleUserQR(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSuffix(r.PathValue("user"), ".png")
+	key, err := s.cfg.Room.UserQRKey(name, false)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeQR(w, s.AppURL()+"#accesso="+key)
+}
+
+func (s *Server) channelExists(id string) bool {
+	for _, c := range s.cfg.Room.Channels() {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func writeQR(w http.ResponseWriter, text string) {
 	png, err := qrcode.Encode(text, qrcode.Medium, 512)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

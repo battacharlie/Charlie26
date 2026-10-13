@@ -50,18 +50,24 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Username, Password string }
+	var req struct{ Username, Password, Key string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "richiesta non valida"})
 		return
 	}
-	token, err := s.cfg.Room.Login(req.Username, req.Password)
+	var token, name string
+	var err error
+	if req.Key != "" {
+		token, name, err = s.cfg.Room.LoginKey(req.Key)
+	} else {
+		token, err = s.cfg.Room.Login(req.Username, req.Password)
+	}
 	if err != nil {
 		time.Sleep(700 * time.Millisecond) // rallenta chi prova password a caso
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"session": token})
+	writeJSON(w, http.StatusOK, map[string]string{"session": token, "name": name})
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +241,12 @@ func applyOp(e *evento.Event, op eventOp) error {
 		return e.SetUser(op.User, op.Password)
 	case "removeUser":
 		return e.RemoveUser(op.User.Username)
+	case "newQRKey":
+		u := e.User(op.User.Username)
+		if u == nil {
+			return errors.New("utente inesistente")
+		}
+		u.QRKey, _ = evento.NewToken()
 	default:
 		return errors.New("operazione sconosciuta: " + op.Op)
 	}

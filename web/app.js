@@ -187,12 +187,23 @@
   }
   loadInfo();
 
+  // QR personale: https://…/#accesso=CHIAVE. La chiave si conserva sul
+  // telefono e si toglie dalla barra degli indirizzi.
+  const hashKey = /[#&]accesso=([0-9a-f]{32,})/.exec(location.hash);
+  if (hashKey) {
+    saveJSON('intercom.key', hashKey[1]);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  // QR di un canale: https://…/?canale=video
+  const urlChannel = new URLSearchParams(location.search).get('canale');
+
   function prepareJoinForm() {
     const cred = state.mode === 'credenziali';
     $('freeForm').classList.toggle('hidden', cred);
     $('loginForm').classList.toggle('hidden', !cred);
     if (cred) {
       $('userInput').value = loadJSON('intercom.user', '');
+      prepareKeyLogin();
       return;
     }
     const sel = $('channelInput');
@@ -208,10 +219,41 @@
     o.textContent = '➕ Crea un nuovo canale…';
     sel.appendChild(o);
     const saved = loadJSON('intercom.join', {});
-    if (saved.channel && state.channels.some((c) => c.id === saved.channel)) sel.value = saved.channel;
+    const wanted = urlChannel || saved.channel;
+    if (wanted && state.channels.some((c) => c.id === wanted)) sel.value = wanted;
     sel.onchange = updateFreeFields;
     updateFreeFields();
   }
+
+  // Accesso diretto con la chiave del QR personale: verifico subito la chiave
+  // e mostro "Ciao Marco": basta premere Entra.
+  let keySession = null;
+  async function prepareKeyLogin() {
+    const key = loadJSON('intercom.key', '');
+    const box = $('keyLogin');
+    if (!key || !box) return;
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+      const out = await r.json();
+      if (!r.ok) {
+        saveJSON('intercom.key', '');
+        showJoinError(out.error || 'QR non valido.');
+        return;
+      }
+      keySession = out.session;
+      $('keyName').textContent = out.name;
+      box.classList.remove('hidden');
+      $('loginFields').classList.add('hidden');
+    } catch (_) { /* resta il login normale */ }
+  }
+  const otherUser = $('otherUser');
+  if (otherUser) otherUser.addEventListener('click', (e) => {
+    e.preventDefault();
+    saveJSON('intercom.key', '');
+    keySession = null;
+    $('keyLogin').classList.add('hidden');
+    $('loginFields').classList.remove('hidden');
+  });
 
   function updateFreeFields() {
     const v = $('channelInput').value;
@@ -231,6 +273,8 @@
       state.name = nameInput.value.trim() || 'Regia';
       saveJSON('intercom.name', state.name);
       req = { regia: true, name: state.name };
+    } else if (state.mode === 'credenziali' && keySession) {
+      req = { session: keySession };
     } else if (state.mode === 'credenziali') {
       const username = $('userInput').value.trim();
       const password = $('userPassword').value;

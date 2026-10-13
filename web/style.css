@@ -329,3 +329,9 @@ a.mini { text-decoration: none; display: inline-block; }
 .net { margin-top: .7rem; }
 .net-row { display: flex; gap: .4rem; margin-top: .2rem; }
 .net-row select { padding: .4rem .5rem; font-size: .85rem; border-radius: 8px; flex: 1; min-width: 0; }
+.hello { font-size: 1.15rem; margin: .4rem 0 1rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .6rem; margin-top: .6rem; }
+.qr-card { display: flex; gap: .6rem; align-items: center; background: #13161a; border: 1px solid var(--line); border-radius: 10px; padding: .5rem; }
+.qr-card img { width: 92px; height: 92px; background: #fff; border-radius: 6px; padding: 3px; flex: none; }
+.qr-card-text { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.qr-card-text .row { margin: .3rem 0 0; }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -722,5 +723,69 @@ func TestChangeNetwork(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest || srv.Host() != "10.0.0.7" {
 		t.Fatal("un IP non valido deve essere rifiutato senza cambiare nulla")
+	}
+}
+
+func TestUserQR(t *testing.T) {
+	ts, room := startServer(t, credentialsEvent(t))
+	get := func(path string) (int, []byte) {
+		resp, err := ts.Client().Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, b
+	}
+	if code, b := get("/qr/utente/cam1.png"); code != 200 || !bytes.HasPrefix(b, []byte("\x89PNG")) {
+		t.Fatalf("QR personale: %d", code)
+	}
+	if code, _ := get("/qr/utente/nessuno.png"); code != 404 {
+		t.Fatal("QR di un utente inesistente")
+	}
+	if code, _ := get("/qr/app.png?canale=video"); code != 200 {
+		t.Fatal("QR di un canale")
+	}
+	if code, _ := get("/qr/app.png?canale=inventato"); code != 404 {
+		t.Fatal("QR di un canale inesistente")
+	}
+	key, err := room.UserQRKey("cam1", false)
+	if err != nil || len(key) < 32 {
+		t.Fatalf("chiave: %q %v", key, err)
+	}
+	if room.Event().User("cam1").QRKey != "" {
+		t.Fatal("la configurazione mostrata nella console non deve contenere la chiave")
+	}
+	loginKey := func(k string) (int, string) {
+		resp, err := ts.Client().Post(ts.URL+"/api/login", "application/json", strings.NewReader(`{"key":"`+k+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out struct{ Session, Name string }
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out.Name
+	}
+	if code, name := loginKey(key); code != 200 || name != "Cam1" {
+		t.Fatalf("accesso con chiave: %d %q", code, name)
+	}
+	// Con la sessione ottenuta dalla chiave si entra davvero.
+	resp, _ := ts.Client().Post(ts.URL+"/api/login", "application/json", strings.NewReader(`{"key":"`+key+`"}`))
+	var out struct{ Session string }
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	cam := newFakePhone(t, ts, "Cam1", map[string]any{"session": out.Session})
+	if p := findPeer(t, ts, "Cam1"); p.ID != cam.id {
+		t.Fatal("ingresso con QR personale non riuscito")
+	}
+	// Nuovo codice: quello vecchio non vale più.
+	if _, err := room.UserQRKey("cam1", true); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := loginKey(key); code != http.StatusUnauthorized {
+		t.Fatalf("la chiave vecchia deve essere rifiutata: %d", code)
+	}
+	if code, _ := loginKey(strings.Repeat("0", 48)); code != http.StatusUnauthorized {
+		t.Fatal("chiave inventata accettata")
 	}
 }

@@ -57,7 +57,7 @@
     const nav = $('configTabs');
     nav.textContent = '';
     const cred = ev.mode === 'credenziali';
-    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['video', 'Video'], ['registro', 'Registro']]) {
+    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['qr', 'QR'], ['video', 'Video'], ['registro', 'Registro']]) {
       nav.append(el('button', { class: tab === id ? 'sel' : '', onclick: () => { tab = id; try { localStorage.setItem('regia.tab', id); } catch (_) {} render(); } }, label));
     }
   }
@@ -67,7 +67,7 @@
     const body = $('configBody');
     body.textContent = '';
     clearInterval(logTimer);
-    ({ evento: renderEvent, canali: renderChannels, utenti: renderUsers, video: renderVideo, registro: renderLog }[tab] || renderEvent)(body);
+    ({ evento: renderEvent, canali: renderChannels, utenti: renderUsers, video: renderVideo, registro: renderLog, qr: renderQR }[tab] || renderEvent)(body);
   }
 
   function renderEvent(body) {
@@ -125,6 +125,37 @@
         document.body.innerHTML = '<div class="doc"><h1>Intercom spento</h1><p class="muted">Per riaccenderlo avvia di nuovo il programma.</p></div>';
       },
     }, '⏻ Spegni il programma'), el('span', { class: 'small muted' }, 'Su Windows si può spegnere anche dall\'icona vicino all\'orologio.')));
+  }
+
+  // QR: generale, per canale (libero accesso) o per utente (credenziali).
+  function qrCard(src, title, sub, file, extra) {
+    return el('div', { class: 'qr-card' },
+      el('img', { src: src + (src.includes('?') ? '&' : '?') + 't=' + Date.now(), alt: '' }),
+      el('div', { class: 'qr-card-text' }, el('b', {}, title), el('span', { class: 'small muted' }, sub),
+        el('div', { class: 'row' }, el('a', { class: 'mini', href: src, download: file }, 'PNG'), extra)));
+  }
+  function renderQR(body) {
+    const cred = ev.mode === 'credenziali';
+    body.append(el('div', { class: 'row' },
+      el('button', { class: 'mini primary', onclick: () => window.open('/regia/qr', '_blank') }, '🖨 Stampa / salva PDF'),
+      el('span', { class: 'small muted' }, cred
+        ? 'Il QR personale fa entrare direttamente, senza password: consegnalo solo alla persona giusta.'
+        : 'Il QR di un canale apre l\'app con quel canale già scelto.')));
+    const grid = el('div', { class: 'qr-grid' });
+    grid.append(qrCard('/qr/app.png', 'Tutti', cred ? 'pagina di accesso' : 'scelgono il canale', 'intercom-tutti.png'));
+    if (cred) {
+      for (const u of ev.users || []) {
+        const renew = el('button', { class: 'mini', title: 'Il QR vecchio smette di funzionare', onclick: () => {
+          if (confirm('Creare un nuovo QR per ' + u.name + '? Quello vecchio non funzionerà più.')) op({ op: 'newQRKey', user: { username: u.username } }, 'Nuovo QR creato');
+        } }, 'Nuovo codice');
+        const chs = (u.channels || []).map((id) => (ev.channels.find((c) => c.id === id) || {}).name).filter(Boolean).join(', ');
+        grid.append(qrCard('/qr/utente/' + encodeURIComponent(u.username) + '.png', u.name, (u.role === 'admin' ? 'Caporeparto' : 'Tecnico') + (chs ? ' · ' + chs : ''), 'intercom-' + u.username + '.png', renew));
+      }
+      if (!(ev.users || []).length) grid.append(el('p', { class: 'muted' }, 'Crea gli utenti nella scheda Utenti: qui compariranno i loro QR personali.'));
+    } else {
+      for (const c of ev.channels) grid.append(qrCard('/qr/app.png?canale=' + encodeURIComponent(c.id), c.name, c.main ? 'canale principale' : 'reparto', 'intercom-' + c.id + '.png'));
+    }
+    body.append(grid);
   }
 
   // Registro: i messaggi che prima comparivano nella finestra nera.
