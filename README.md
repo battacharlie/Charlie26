@@ -238,7 +238,7 @@ go run ./tools/winres -version 1.0.0  # icona e versione per l'eseguibile Window
 
 **App Android** (cartella `mobile/`, Capacitor): `npm ci && npm run prepare-www && npx cap sync android`, poi `cd android && ./gradlew assembleDebug` (serve l'Android SDK). La pagina iniziale con il lettore QR è in `mobile/www/`; la parte nativa (certificato dell'evento, servizio in secondo piano, pop-up) in `mobile/android/app/src/main/java/`.
 
-**Pubblicare una release**: su GitHub *Releases → Draft a new release*, crea un tag `vX.Y.Z` (es. `v1.0.0`) e pubblica. La compilazione automatica allega da sola i file per Windows, Mac e Android.
+**Pubblicare una release**: scrivi il nuovo numero nel file `VERSION` (es. `1.2.0`) e porta le modifiche su `main`: la compilazione automatica crea da sola la release `v1.2.0` con i file per Windows, Mac e Android. In alternativa, su GitHub *Releases → Draft a new release* con un nuovo tag `vX.Y.Z`.
 
 ## Licenze di terze parti
 
