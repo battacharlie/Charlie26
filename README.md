@@ -2,7 +2,7 @@
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
-> **Stato: Fase 4**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), avatar, riduzione rumore forte. Prossima: video dalla regia.
+> **Stato: Fase 5**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), **video** (dalla regia, da OBS e dai telefoni, con consenso e qualità selezionabile), avatar, riduzione rumore forte.
 
 ## Come funziona
 
@@ -56,13 +56,31 @@ I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 ## Console di regia
 
 Si apre da sola all'avvio (`https://localhost:8443/regia`) ed è pensata per stare in uno schermo 16:9:
-- **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, **rete usata nei QR** (se il PC ha più schede di rete, si sceglie qui; la scelta viene ricordata), anteprime video (dalla Fase 5);
+- **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, **rete usata nei QR** (se il PC ha più schede di rete, si sceglie qui; la scelta viene ricordata), **anteprime video** (qualità bassa, massimo 15 fps; clic = grande in qualità alta);
 - **in alto a destra, Configurazione**, con le schede:
   - *Evento*: nome, modalità di accesso, **modelli di evento** (salva la configurazione con un nome, ricaricala con un clic), **Esporta / Importa** su file `.json` (per prepararla su un altro computer), **Spegni il programma**;
-  - *Canali*, *Utenti*, *Video*;
+  - *Canali*, *Utenti*;
+  - *Video*: invio di periferiche del browser, indirizzo e chiave per OBS, richieste da approvare (vedi sotto);
   - *QR*: QR generale, **QR per canale** (libero accesso: l'app propone già quel canale) o **QR personale per utente** (credenziali: si entra senza password), ognuno scaricabile in PNG; **Stampa / salva PDF** apre un foglio A4 con le schede da ritagliare;
   - *Registro*: i messaggi del programma, salvati anche in `intercom.log` nella cartella dati;
 - **in basso a destra, Intercom**: tasti PARLA per canale, PARLA A TUTTI, lista dei collegati.
+
+## Video
+
+Ci possono essere **più video contemporaneamente**, ognuno destinato a uno o più canali.
+
+| Chi | Da dove | Dove arriva |
+|---|---|---|
+| **Regia** | console, scheda *Video*: una periferica del browser (scheda di acquisizione, webcam, **OBS Virtual Camera**, **vMix Video**). Se ne possono avviare più di una | nei canali scelti, **subito**; in ogni canale solo se il caporeparto ha attivato *Video della regia* (⚙ o scheda Canali) |
+| **OBS** (WHIP) | OBS ≥ 30: *Impostazioni → Trasmissione → Servizio "WHIP"*, con l'indirizzo e la chiave (Bearer Token) mostrati nella scheda *Video* | come il video della regia; i canali si scelgono dalla console |
+| **Caporeparto** | telefono, **📹 Mostra video** (fotocamera posteriore o frontale) | **subito** nei canali di cui è caporeparto; in Produzione serve il consenso della regia |
+| **Tecnico** | telefono, **📹 Mostra video** | parte solo quando un caporeparto di quel canale (o la regia) preme **Approva**. Chi deve decidere riceve un avviso e vede l'anteprima |
+
+- **Fermare un video**: chi lo invia, il caporeparto del canale o la regia. Il video della regia lo ferma solo la regia; il caporeparto può solo non farlo arrivare nel suo canale.
+- **Qualità** (telefono, sopra i video): **Alta**, **Bassa** (circa 360p, 15 fps: consuma poco) o **Spento**. Tocca un video per vederlo a schermo intero.
+- I video dal browser partono sempre in due versioni, alta e bassa, e il server manda a ognuno quella scelta, cambiando senza interruzioni. OBS manda una sola versione: chi guarda riceve sempre quella.
+- **vMix**: il modo più semplice è l'uscita *Virtual Camera* di vMix, da scegliere nella scheda *Video* della console.
+- Latenza tipica in rete locale: qualche decimo di secondo.
 
 ## Avatar
 All'ingresso ognuno sceglie un avatar: uno dei quattro mostriciattoli (Bit, Byte, Pixel, Glitch) oppure una **foto** (📷). La foto viene ritagliata e ridotta sul telefono a pochi KB prima dell'invio. Si cambia anche da collegati, toccando il proprio avatar in alto.
