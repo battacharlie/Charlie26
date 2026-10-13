@@ -58,7 +58,8 @@
         el('li', {}, 'Inquadra il QR che compare con la fotocamera (o con l\'app CHARLIE26).'),
         el('li', {}, 'Il telefono diventa una seconda regia, con gli stessi comandi del computer.')),
       el('p', { class: 'muted small' }, 'Il codice vale 5 minuti e una sola volta. Dalla console puoi revocare l\'abbinamento quando vuoi.'),
-      el('p', {}, el('a', { class: 'btn', href: '/' }, 'Entra invece come tecnico'))));
+      el('p', {}, el('a', { class: 'btn', href: '/' }, 'Entra invece come tecnico')),
+      window.charlieApp ? el('p', {}, el('button', { class: 'linkbtn', onclick: () => window.charlieApp.home() }, '↩ Torna alla scansione del QR')) : null));
   }
 
   // ---------- Telefoni abbinati come regia ----------
@@ -185,7 +186,7 @@
       await fetch('/api/regia/spegni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     } catch (_) {}
     document.body.innerHTML = '<div class="doc"><h1>CHARLIE26 spento</h1><p class="muted">Puoi chiudere questa scheda. Per riaccenderlo avvia di nuovo il programma.</p></div>';
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) { window.Capacitor.Plugins.App.exitApp(); return; }
+    if (window.charlieApp) { setTimeout(() => window.charlieApp.exitApp(), 800); return; }
     // I browser permettono a una pagina di chiudere la propria scheda solo se è stata
     // aperta dal programma (o da uno script); altrimenti resta il messaggio qui sopra.
     window.close();
@@ -251,7 +252,7 @@
       item('📱 Abbina un altro telefono', pairDialog),
       el('hr'),
       item('⏹ Termina evento (spegne CHARLIE26)', shutdown, 'danger'),
-      item(window.Capacitor ? '✕ Chiudi app' : '✕ Esci dalla regia', closeApp));
+      item(window.charlieApp ? '✕ Chiudi app' : '✕ Esci dalla regia', closeApp));
     document.body.append(menu);
     setTimeout(() => document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.remove(); }, { once: true }), 0);
   }
@@ -275,10 +276,7 @@
   // Chiudi: lascia il pannello senza spegnere niente per gli altri.
   function closeApp() {
     if (window.intercomLeave) window.intercomLeave();
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
-      window.Capacitor.Plugins.App.exitApp();
-      return;
-    }
+    if (window.charlieApp) { window.charlieApp.exitApp(); return; }
     document.body.innerHTML = '<div class="doc"><h1>Uscito dalla regia</h1><p class="muted">CHARLIE26 resta acceso per tutti. Puoi chiudere questa scheda.</p><p><a class="btn" href="/regia">Rientra</a></p></div>';
     window.close();
   }

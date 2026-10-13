@@ -332,7 +332,7 @@
     state.joined = true;
     connect();
     keepScreenOn();
-    if (pipSupported()) pipSetup();
+    if (pipSupported() || nativeApp) pipSetup();
   }
 
   function showJoinError(html) {
@@ -344,6 +344,7 @@
   function backToJoin(message) {
     state.joined = false;
     if (document.pictureInPictureElement && document.exitPictureInPicture) document.exitPictureInPicture().catch(() => {});
+    if (nativeApp) { pip.sent = ''; window.charlieApp.update('{"joined":false}'); }
     state.me = null;
     clearTimeout(state.retryTimer);
     teardown();
@@ -1552,7 +1553,9 @@
   // video ricevuto (se c'è) oppure un riquadro con canale, stato del
   // microfono e chi parla. I tasti ▶/⏸ della finestrella aprono e chiudono il
   // microfono (nel pop-up non si può tenere premuto: è sempre un tocco).
-  const pip = { video: null, canvas: null, ctx: null, logo: null, timer: null, src: null, lastChs: null };
+  const pip = { video: null, canvas: null, ctx: null, logo: null, timer: null, src: null, lastChs: null, sent: '' };
+  // Nell'app CHARLIE26 (Android) il pop-up e la notifica sono nativi.
+  const nativeApp = !!(window.charlieApp && window.charlieApp.isApp && window.charlieApp.isApp());
   const pipSupported = () => !!(document.pictureInPictureEnabled || (HTMLVideoElement.prototype.webkitSupportsPresentationMode && HTMLVideoElement.prototype.webkitSupportsPresentationMode('picture-in-picture')));
   const pipActive = () => !!(document.pictureInPictureElement || (pip.video && pip.video.webkitPresentationMode === 'picture-in-picture'));
 
@@ -1646,6 +1649,10 @@
     }
     const btn = $('pipBtn');
     if (btn) btn.classList.toggle('on', pipActive());
+    if (nativeApp) {
+      const st = JSON.stringify(window.intercomPip.state());
+      if (st !== pip.sent) { pip.sent = st; window.charlieApp.update(st); }
+    }
   }
 
   function pipDraw(note) {
@@ -1704,6 +1711,20 @@
 
   function pipInit() {
     const btn = $('pipBtn');
+    if (nativeApp) {
+      // Pop-up nativo: la pagina mostra solo il video (o il riquadro di stato).
+      window.charliePipMode = (on) => { document.body.classList.toggle('app-pip', !!on); pipRefresh(); };
+      if (btn) btn.addEventListener('click', () => { pipSetup(); pipRefresh(); window.charlieApp.enterPip(); });
+      const join = $('joinView');
+      if (join && !isConsole) {
+        const back = document.createElement('button');
+        back.className = 'linkbtn';
+        back.textContent = '↩ Scansiona un altro QR';
+        back.addEventListener('click', () => window.charlieApp.home());
+        join.appendChild(back);
+      }
+      return;
+    }
     if (!btn) return;
     if (!pipSupported()) { btn.remove(); return; }
     btn.addEventListener('click', pipToggle);

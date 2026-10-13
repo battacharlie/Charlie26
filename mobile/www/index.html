@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CHARLIE26</title>
+  <link rel="stylesheet" href="start.css">
+</head>
+<body>
+  <header class="brand">
+    <img src="brand/icon-192.png" alt="">
+    <div><span class="word">CHARLIE<b>26</b></span><span class="tag">INTERCOM EVOLUTO</span></div>
+  </header>
+
+  <main>
+    <p class="lead">Inquadra il QR dell'evento: <b>tecnici</b> e <b>caporeparto</b> entrano nel proprio canale, il QR <b>📱 Abbina telefono</b> della console ti rende <b>regia</b>.</p>
+    <div class="scanner" id="scanner">
+      <video id="cam" playsinline muted></video>
+      <div class="frame"></div>
+      <div class="scan-msg" id="scanMsg">Avvio fotocamera…</div>
+    </div>
+    <div class="banner hidden" id="err"></div>
+
+    <section id="recentBox" class="hidden">
+      <h2>Riapri</h2>
+      <div id="recent"></div>
+    </section>
+
+    <details class="manual">
+      <summary>Inserisci l'indirizzo a mano</summary>
+      <form id="manualForm">
+        <input id="manualUrl" type="url" inputmode="url" placeholder="https://192.168.1.10:8443/" autocomplete="off">
+        <button class="btn" type="submit">Apri</button>
+      </form>
+      <p class="small">Con l'indirizzo a mano l'app non può verificare il certificato dell'evento: usa il QR quando puoi.</p>
+    </details>
+  </main>
+
+  <footer class="credits"><a href="https://www.andreabattaglioli.it" id="site">CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – www.andreabattaglioli.it · ABit/s · Made in Bolognina</a></footer>
+
+  <canvas id="grab" hidden></canvas>
+  <script src="jsQR.js"></script>
+  <script src="start.js"></script>
+</body>
+</html>

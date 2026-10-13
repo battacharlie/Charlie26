@@ -41,8 +41,43 @@ jobs:
               -o "dist/charlie26-$os-$arch$ext" .
           done
           rm -f rsrc_windows_amd64.syso
-          (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
+      # ---------- App Android (Capacitor) ----------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: Compila app Android
+        working-directory: mobile
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          C26_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then NUM="${GITHUB_REF_NAME#v}"; else NUM="0.0.${GITHUB_RUN_NUMBER}"; fi
+          # versionCode crescente: 1.2.3 → 10203 (le prove usano il numero di compilazione)
+          IFS=. read -r MA MI PA <<< "$NUM"
+          CODE=$(( MA * 10000 + MI * 100 + PA )); [ "$CODE" -lt 1 ] && CODE=1
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || CODE=$GITHUB_RUN_NUMBER
+          npm ci --no-audit --no-fund
+          npm run prepare-www
+          npx cap sync android
+          cd android
+          if [ -n "$KEYSTORE_B64" ]; then
+            # Firma stabile: gli aggiornamenti si installano sopra la versione precedente.
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/charlie26.keystore"
+            export C26_KEYSTORE="$RUNNER_TEMP/charlie26.keystore"
+            ./gradlew assembleRelease --no-daemon -Pc26Version="$NUM" -Pc26VersionCode="$CODE"
+            cp app/build/outputs/apk/release/app-release.apk ../../dist/charlie26-android.apk
+          else
+            echo "::warning::Chiave di firma Android non configurata: APK di prova (per aggiornarlo va disinstallata la versione precedente)."
+            ./gradlew assembleDebug --no-daemon -Pc26Version="$NUM" -Pc26VersionCode="$CODE"
+            cp app/build/outputs/apk/debug/app-debug.apk ../../dist/charlie26-android.apk
+          fi
+          (cd ../../dist && sha256sum charlie26-* > SHA256SUMS.txt && ls -la)
       - uses: actions/upload-artifact@v4
         with:
           name: charlie26
@@ -59,6 +94,7 @@ jobs:
             | `charlie26-windows-amd64.exe` | Windows 10/11 |
             | `charlie26-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
             | `charlie26-darwin-amd64` | Mac con processore Intel |
+            | `charlie26-android.apk` | App per telefoni Android (tecnici e regia da smartphone) |
 
             **Windows**: doppio clic. Se compare "Windows ha protetto il PC": *Ulteriori informazioni → Esegui comunque*. Al primo avvio consenti l'accesso alle **Reti private**. Il programma resta come icona vicino all'orologio.
 
@@ -68,6 +104,8 @@ jobs:
             xattr -d com.apple.quarantine charlie26-darwin-arm64
             ./charlie26-darwin-arm64
             ```
+
+            **Android**: apri `charlie26-android.apk` dal telefono e consenti "Installa app sconosciute" per il browser o per File.
 
             CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · ABit/s · Made in Bolognina
 
