@@ -310,21 +310,83 @@ func (p *Peer) Kick(targetID string) error {
 	return nil
 }
 
-// Promote: in libero accesso la regia nomina responsabile di un canale un
-// partecipante (che riceve il gettone da conservare).
+// Promote: la regia nomina caporeparto un partecipante.
+//   - libero accesso: responsabile del canale indicato; riceve un gettone da
+//     conservare sul telefono;
+//   - credenziali: il suo utente diventa Caporeparto dei canali assegnati.
 func (p *Peer) Promote(targetID, channel string) error {
 	r := p.room
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t := r.peers[targetID]
-	ch := r.event.Channel(channel)
-	if p.Role != RoleRegia || t == nil || ch == nil || ch.Main || t.ident.kind != identFree {
+	if p.Role != RoleRegia || t == nil || t == p {
 		return ErrNotAllowed
 	}
-	token, hash := evento.NewToken()
-	ch.OwnerHashes = append(ch.OwnerHashes, hash)
-	t.ident.ownerTokens = append(t.ident.ownerTokens, token)
-	t.send(Message{Type: "ownerToken", Channel: channel, Token: token})
+	switch t.ident.kind {
+	case identFree:
+		ch := r.event.Channel(channel)
+		if ch == nil || ch.Main {
+			return errors.New("scegli un sottocanale (non il canale principale)")
+		}
+		token, hash := evento.NewToken()
+		ch.OwnerHashes = append(ch.OwnerHashes, hash)
+		t.ident.ownerTokens = append(t.ident.ownerTokens, token)
+		t.send(Message{Type: "ownerToken", Channel: channel, Token: token})
+	case identUser:
+		u := r.event.User(t.ident.username)
+		if u == nil {
+			return ErrNotAllowed
+		}
+		u.Role = evento.RoleAdmin
+	default:
+		return ErrNotAllowed
+	}
+	log.Printf("la regia nomina %s caporeparto", t.Name)
+	r.saveLocked()
+	r.refreshLocked()
+	return nil
+}
+
+// Demote: la regia toglie a un partecipante il ruolo di caporeparto.
+//   - libero accesso: i suoi gettoni da caporeparto vengono annullati su tutti
+//     i canali (anche quelli salvati sul suo telefono smettono di valere);
+//   - credenziali: il suo utente diventa Tecnico.
+func (p *Peer) Demote(targetID string) error {
+	r := p.room
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t := r.peers[targetID]
+	if p.Role != RoleRegia || t == nil || t == p {
+		return ErrNotAllowed
+	}
+	switch t.ident.kind {
+	case identFree:
+		mine := map[string]bool{}
+		for _, tok := range t.ident.ownerTokens {
+			mine[evento.TokenHash(tok)] = true
+		}
+		for i := range r.event.Channels {
+			ch := &r.event.Channels[i]
+			kept := ch.OwnerHashes[:0]
+			for _, h := range ch.OwnerHashes {
+				if !mine[h] {
+					kept = append(kept, h)
+				}
+			}
+			ch.OwnerHashes = kept
+		}
+		t.ident.ownerTokens = nil
+		t.send(Message{Type: "ownerRevoked"})
+	case identUser:
+		u := r.event.User(t.ident.username)
+		if u == nil {
+			return ErrNotAllowed
+		}
+		u.Role = evento.RoleUser
+	default:
+		return ErrNotAllowed
+	}
+	log.Printf("la regia toglie a %s il ruolo di caporeparto", t.Name)
 	r.saveLocked()
 	r.refreshLocked()
 	return nil

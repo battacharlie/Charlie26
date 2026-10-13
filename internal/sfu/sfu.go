@@ -103,7 +103,11 @@ type dest struct {
 
 // Peer è un partecipante collegato.
 type Peer struct {
-	ID   string
+	ID    string
+	Label string // etichetta fissa per il registro (leggibile senza lock)
+
+	// Name e Role possono cambiare quando la regia modifica l'evento:
+	// vanno letti con room.mu bloccato.
 	Name string
 	Role string
 
@@ -215,6 +219,7 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 	r.nextID++
 	p := &Peer{
 		ID:      fmt.Sprintf("p%d", r.nextID),
+		Label:   fmt.Sprintf("p%d %s (%s)", r.nextID, res.name, res.role),
 		Name:    res.name,
 		Role:    res.role,
 		room:    r,
@@ -233,7 +238,7 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 
 	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) { r.forwardTrack(p, remote) })
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		log.Printf("[%s %s] connessione: %s", p.ID, p.Name, s)
+		log.Printf("[%s] connessione: %s", p.Label, s)
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			go p.Close()
 		}
@@ -277,7 +282,7 @@ func (r *Room) forwardTrack(p *Peer, remote *webrtc.TrackRemote) {
 			_ = p.pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: ssrc}})
 		}
 	}
-	log.Printf("[%s %s] nuovo flusso %s (%s)", p.ID, p.Name, remote.Kind(), remote.Codec().MimeType)
+	log.Printf("[%s] nuovo flusso %s (%s)", p.Label, remote.Kind(), remote.Codec().MimeType)
 
 	r.mu.Lock()
 	r.tracks[f.id] = f
@@ -518,7 +523,7 @@ func (p *Peer) Close() {
 	r.mu.Lock()
 	r.broadcastPeersLocked()
 	r.mu.Unlock()
-	log.Printf("[%s %s] uscito", p.ID, p.Name)
+	log.Printf("[%s] uscito", p.Label)
 }
 
 func (p *Peer) infoLocked() PeerInfo {

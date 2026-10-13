@@ -258,6 +258,11 @@
           storeOwnerToken(m.channel, m.token);
           banner('Sei stato nominato caporeparto di ' + chName(m.channel) + '.', false);
           break;
+        case 'ownerRevoked':
+          // La regia mi ha tolto il ruolo di caporeparto: i gettoni salvati non valgono più.
+          saveJSON('intercom.owner', {});
+          banner('La regia ti ha tolto il ruolo di caporeparto.', false);
+          break;
         case 'kicked':
           backToJoin(m.error);
           break;
@@ -667,16 +672,21 @@
         li.appendChild(b);
       }
       if (regia && p.id !== state.me.id) {
-        if (state.mode === 'libero' && p.role === 'tecnico') {
-          const sub = (p.channels || []).find((c) => !chInfo(c).main);
-          if (sub) {
-            const pr = document.createElement('button');
-            pr.className = 'mini';
-            pr.textContent = 'Nomina caporeparto';
-            pr.title = 'Diventa caporeparto di ' + chName(sub);
-            pr.addEventListener('click', () => send({ type: 'promote', peer: p.id, channel: sub }));
-            li.appendChild(pr);
-          }
+        const sub = (p.channels || []).find((c) => !chInfo(c).main);
+        if (p.role === 'tecnico' && sub) {
+          const pr = document.createElement('button');
+          pr.className = 'mini';
+          pr.textContent = 'Nomina caporeparto';
+          pr.title = 'Diventa caporeparto di ' + chName(sub);
+          pr.addEventListener('click', () => send({ type: 'promote', peer: p.id, channel: sub }));
+          li.appendChild(pr);
+        } else if (p.role === 'caporeparto') {
+          const de = document.createElement('button');
+          de.className = 'mini';
+          de.textContent = 'Togli caporeparto';
+          de.title = p.name + ' torna tecnico';
+          de.addEventListener('click', () => { if (confirm('Togliere a ' + p.name + ' il ruolo di caporeparto?')) send({ type: 'demote', peer: p.id }); });
+          li.appendChild(de);
         }
         const k = document.createElement('button');
         k.className = 'mini danger';

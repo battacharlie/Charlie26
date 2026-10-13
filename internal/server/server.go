@@ -308,7 +308,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(200 * time.Millisecond)
 				return
 			}
-			log.Printf("[%s %s] entrato come %s da %s", peer.ID, peer.Name, peer.Role, r.RemoteAddr)
+			log.Printf("[%s] entrato da %s", peer.Label, r.RemoteAddr)
 		case "answer":
 			if peer != nil {
 				if err := peer.HandleAnswer(m.SDP); err != nil {
@@ -327,7 +327,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil {
 				peer.SetListen(m.Channel, m.On)
 			}
-		case "control", "channelSettings", "kick", "promote":
+		case "control", "channelSettings", "kick", "promote", "demote":
 			if peer == nil {
 				continue
 			}
@@ -341,6 +341,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				err = peer.Kick(m.Peer)
 			case "promote":
 				err = peer.Promote(m.Peer, m.Channel)
+			case "demote":
+				err = peer.Demote(m.Peer)
 			}
 			if err != nil {
 				send(sfu.Message{Type: "error", Error: err.Error()})

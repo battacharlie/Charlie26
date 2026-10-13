@@ -172,7 +172,7 @@ func (f *fakePhone) loop() {
 		case "error":
 			f.t.Logf("%s: errore dal server: %s", f.name, m.Error)
 			f.msgs <- m
-		case "mute", "kicked", "me", "ownerToken":
+		case "mute", "kicked", "me", "ownerToken", "ownerRevoked":
 			f.msgs <- m
 		case "offer":
 			if f.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
@@ -432,6 +432,75 @@ func TestFreeAccessSubchannel(t *testing.T) {
 	luca.write(map[string]any{"type": "control", "peer": ugo.id, "channel": "palco", "on": false})
 	expectMsg(t, ugo, "mute")
 	expectHearing(t, all, map[string][]string{})
+
+	// La regia toglie a Luca il ruolo di caporeparto.
+	regia.write(map[string]any{"type": "demote", "peer": luca.id})
+	expectMsg(t, luca, "ownerRevoked")
+	if me := expectMsg(t, luca, "me"); me.Me.Role != sfu.RoleTecnico || len(me.Me.Admin) != 0 {
+		t.Fatalf("dopo la revoca Luca deve essere tecnico: %+v", me.Me)
+	}
+	// Non ha più poteri su Ugo e non parla più in Produzione.
+	luca.write(map[string]any{"type": "control", "peer": ugo.id, "channel": "palco", "on": true})
+	expectMsg(t, luca, "error")
+	luca.talk("produzione")
+	expectHearing(t, all, map[string][]string{})
+	luca.talk()
+
+	// La regia nomina caporeparto Ugo: riceve il gettone e i poteri.
+	regia.write(map[string]any{"type": "promote", "peer": ugo.id, "channel": "palco"})
+	tok := expectMsg(t, ugo, "ownerToken")
+	if me := expectMsg(t, ugo, "me"); me.Me.Role != sfu.RoleCaporeparto {
+		t.Fatalf("Ugo deve essere caporeparto: %+v", me.Me)
+	}
+	// Con il gettone si rientra da caporeparto anche senza password.
+	ugo2 := newFakePhone(t, ts, "Ugo-bis", map[string]any{"channel": "palco", "ownerTokens": []string{tok.Token}})
+	_ = ugo2
+	if p := findPeer(t, ts, "Ugo-bis"); p.Role != sfu.RoleCaporeparto {
+		t.Fatalf("rientro con gettone: %+v", p)
+	}
+}
+
+func findPeer(t *testing.T, ts *httptest.Server, name string) sfu.PeerInfo {
+	t.Helper()
+	resp, err := ts.Client().Get(ts.URL + "/api/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var info struct{ Peers []sfu.PeerInfo }
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	for _, p := range info.Peers {
+		if p.Name == name {
+			return p
+		}
+	}
+	t.Fatalf("%s non è collegato", name)
+	return sfu.PeerInfo{}
+}
+
+// Credenziali: la regia nomina e toglie il ruolo di caporeparto dalla lista dei collegati.
+func TestCredentialsPromoteDemote(t *testing.T) {
+	ts, room := startServer(t, credentialsEvent(t))
+	regia := newFakePhone(t, ts, "Regia", map[string]any{"regia": true})
+	cam := newFakePhone(t, ts, "Cam1", map[string]any{"session": login(t, ts, "cam1", "pass-cam1")})
+
+	regia.write(map[string]any{"type": "promote", "peer": cam.id, "channel": "video"})
+	if me := expectMsg(t, cam, "me"); me.Me.Role != sfu.RoleCaporeparto || len(me.Me.Channels) != 2 {
+		t.Fatalf("cam1 promosso: %+v", me.Me)
+	}
+	if room.Event().User("cam1").Role != evento.RoleAdmin {
+		t.Fatal("la promozione deve essere salvata nell'utente")
+	}
+	regia.write(map[string]any{"type": "demote", "peer": cam.id})
+	if me := expectMsg(t, cam, "me"); me.Me.Role != sfu.RoleTecnico {
+		t.Fatalf("cam1 riportato a tecnico: %+v", me.Me)
+	}
+	if room.Event().User("cam1").Role != evento.RoleUser {
+		t.Fatal("la revoca deve essere salvata nell'utente")
+	}
+	// Un tecnico non può togliere o dare ruoli.
+	cam.write(map[string]any{"type": "promote", "peer": cam.id, "channel": "video"})
+	expectMsg(t, cam, "error")
 }
 
 func TestRegiaAPI(t *testing.T) {
