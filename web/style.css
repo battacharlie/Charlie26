@@ -275,6 +275,7 @@ body[data-role=regia] { overflow: hidden; }
 .config-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .config-head h1 { margin: 0; font-size: 1.1rem; }
 .tabs { display: flex; gap: .3rem; }
+.head-actions { display: flex; gap: .3rem; padding-left: .7rem; border-left: 1px solid var(--line); }
 .tabs button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 8px; padding: .35rem .8rem; cursor: pointer; font-size: .9rem; }
 .tabs button.sel { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 .config .banner { margin: .5rem 0 0; padding: .4rem .7rem; }
