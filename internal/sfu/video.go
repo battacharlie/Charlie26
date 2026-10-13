@@ -239,10 +239,14 @@ func (p *Peer) wantFor(stream string) string {
 }
 
 // canManageVideo: p può approvare o fermare il video (regia o responsabile
-// di almeno un canale di destinazione).
+// di almeno un canale di destinazione). Il video della regia lo ferma solo la
+// regia: il caporeparto decide solo se arriva nel suo canale.
 func canManageVideo(p *Peer, s *VideoStream) bool {
 	if p.Role == RoleRegia {
 		return true
+	}
+	if s.fromRegia {
+		return false
 	}
 	for c := range s.channels {
 		if p.admin[c] {
@@ -539,11 +543,14 @@ func (r *Room) syncVideoLocked() {
 				if err != nil {
 					continue
 				}
-				sender, err := p.pc.AddTrack(local)
+				// Linea dedicata in sola uscita: AddTrack potrebbe riusare una
+				// linea con cui questo browser sta inviando il suo video.
+				tr, err := p.pc.AddTransceiverFromTrack(local, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 				if err != nil {
-					log.Printf("[%s] AddTrack video: %v", p.Label, err)
+					log.Printf("[%s] linea video: %v", p.Label, err)
 					continue
 				}
+				sender := tr.Sender()
 				d := &vdest{to: p, local: local, sender: sender}
 				d.want.Store(p.wantFor(s.ID))
 				next = append(next, d)

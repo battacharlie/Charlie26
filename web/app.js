@@ -392,9 +392,11 @@
         case 'offer':
           try {
             await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+            await applyVideoSlots(pc, m.video || []);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             send({ type: 'answer', sdp: pc.localDescription.sdp });
+            tuneVideoSenders();
           } catch (e) {
             console.error('negoziazione', e);
             scheduleReconnect();
@@ -429,6 +431,18 @@
           // La regia mi ha tolto il ruolo di caporeparto: i gettoni salvati non valgono più.
           saveJSON('intercom.owner', {});
           banner('La regia ti ha tolto il ruolo di caporeparto.', false);
+          break;
+        case 'videos':
+          onVideos(m.videos || []);
+          break;
+        case 'videoStarted':
+          onVideoStarted(m);
+          break;
+        case 'videoError':
+          onVideoError(m);
+          break;
+        case 'videoDenied':
+          banner(m.error, false);
           break;
         case 'kicked':
           backToJoin(m.error);
@@ -470,6 +484,12 @@
     for (const c of state.listenOff) send({ type: 'listen', channel: c, on: false });
     sendAvatar();
     paintMeAvatar();
+    if (m.videos) video.list = m.videos;
+    send({ type: 'videoQuality', quality: video.q });
+    // Dopo una riconnessione il server non ricorda i video che stavo inviando: li richiedo.
+    for (const loc of video.local.values()) send({ type: 'videoStart', ref: loc.ref, label: loc.label, channels: loc.channels });
+    renderVideos();
+    if (window.intercomVideo && window.intercomVideo.onchange) window.intercomVideo.onchange();
     applyTalk(true);
   }
 
@@ -509,6 +529,9 @@
     state.audioEls.forEach((el) => el.remove());
     state.audioEls.clear();
     state.trackOwner.clear();
+    video.remote.clear();
+    for (const loc of video.local.values()) { loc.id = null; loc.senders = {}; }
+    renderVideos();
   }
 
   function scheduleReconnect() {
@@ -531,7 +554,7 @@
   function attachRemote(track, stream) {
     const owner = stream ? stream.id : track.id;
     state.trackOwner.set(track.id, owner);
-    if (track.kind !== 'audio') return; // il video arriverà nella Fase 5
+    if (track.kind === 'video') { attachVideo(track, stream); return; }
     let el = state.audioEls.get(owner);
     if (!el) {
       el = document.createElement('audio');
@@ -1036,6 +1059,303 @@
     if (state.sender) await state.sender.replaceTrack(sendTrack()).catch(() => {});
     return true;
   }
+
+  // ---------- Video ----------
+  const video = {
+    list: [],             // flussi annunciati dal server
+    remote: new Map(),    // id flusso -> MediaStream ricevuto
+    local: new Map(),     // ref -> { ref, stream, label, channels, id, senders }
+    q: loadJSON('intercom.videoQ', 'l'), // qualità predefinita: h, l, off
+    tiles: new Map(),     // chiave riquadro -> elemento
+    notified: new Set(),  // richieste di consenso già segnalate
+    seq: 0,
+  };
+  const videoBox = () => $('videoArea') || $('previews');
+  // Il video della regia lo ferma solo la regia (il caporeparto decide solo se arriva nel suo canale).
+  const canManageVideo = (v) => !!state.me && (state.me.role === 'regia' || (!v.fromRegia && (v.channels || []).some(isAdminOf)));
+
+  // All'offerta il server dice quale linea usare per ogni video che invio.
+  async function applyVideoSlots(pc, slots) {
+    for (const sl of slots) {
+      const t = pc.getTransceivers().find((x) => x.mid === sl.mid);
+      if (!t) continue;
+      const loc = sl.stream ? video.local.get(sl.ref) : null;
+      const track = loc ? loc.stream.getVideoTracks()[0] : null;
+      try {
+        if (track) t.direction = 'sendonly';
+        if (t.sender.track !== track) await t.sender.replaceTrack(track);
+      } catch (e) { console.error('linea video', e); }
+      if (loc) { loc.id = sl.stream; loc.senders[sl.layer] = t.sender; }
+    }
+  }
+
+  // Corsia alta: piena risoluzione. Corsia bassa: ~360p, massimo 15 fps.
+  async function tuneVideoSenders() {
+    for (const loc of video.local.values()) {
+      const tr = loc.stream.getVideoTracks()[0];
+      if (!tr) continue;
+      const h = tr.getSettings().height || 720;
+      for (const [layer, snd] of Object.entries(loc.senders)) {
+        try {
+          const p = snd.getParameters();
+          if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+          Object.assign(p.encodings[0], layer === 'l'
+            ? { scaleResolutionDownBy: Math.max(1, h / 360), maxBitrate: 350000, maxFramerate: 15 }
+            : { scaleResolutionDownBy: 1, maxBitrate: 2500000, maxFramerate: 30 });
+          await snd.setParameters(p);
+        } catch (e) { console.warn('parametri video', e); }
+      }
+    }
+  }
+
+  async function startLocalVideo(opts) {
+    const v = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } };
+    if (opts.deviceId) v.deviceId = { exact: opts.deviceId };
+    else if (opts.facingMode) v.facingMode = { ideal: opts.facingMode };
+    const stream = await navigator.mediaDevices.getUserMedia({ video: v, audio: false });
+    const track = stream.getVideoTracks()[0];
+    try { track.contentHint = 'motion'; } catch (_) {}
+    const ref = 'r' + Date.now().toString(36) + (++video.seq);
+    video.local.set(ref, { ref, stream, label: opts.label, channels: opts.channels, id: null, senders: {} });
+    track.addEventListener('ended', () => stopLocalVideo(ref));
+    send({ type: 'videoStart', ref, label: opts.label, channels: opts.channels });
+    keepScreenOn();
+    renderVideos();
+    if (window.intercomVideo.onchange) window.intercomVideo.onchange();
+    return ref;
+  }
+
+  function stopLocalVideo(ref, tellServer = true) {
+    const loc = video.local.get(ref);
+    if (!loc) return;
+    video.local.delete(ref);
+    if (tellServer && loc.id) send({ type: 'videoStop', stream: loc.id });
+    for (const snd of Object.values(loc.senders)) snd.replaceTrack(null).catch(() => {});
+    loc.stream.getTracks().forEach((t) => t.stop());
+    renderVideos();
+    if (window.intercomVideo.onchange) window.intercomVideo.onchange();
+  }
+
+  function onVideoStarted(m) {
+    const loc = video.local.get(m.ref);
+    if (loc) loc.id = m.stream;
+    const info = (m.videos || [])[0];
+    if (info && !info.approved) banner('Richiesta inviata: il video parte quando il caporeparto lo approva.', false);
+    renderVideos();
+  }
+
+  function onVideoError(m) {
+    stopLocalVideo(m.ref, false);
+    banner(m.error || 'Video non avviato.', true);
+  }
+
+  function onVideos(list) {
+    video.list = list;
+    const ids = new Set(list.map((v) => v.id));
+    // Un mio video non più in elenco: rifiutato o fermato da un responsabile.
+    for (const loc of [...video.local.values()]) if (loc.id && !ids.has(loc.id)) stopLocalVideo(loc.ref, false);
+    for (const id of [...video.remote.keys()]) if (!ids.has(id)) video.remote.delete(id);
+    // Richieste di consenso per chi deve decidere.
+    for (const v of list) {
+      if (!v.approved && canManageVideo(v) && v.owner !== (state.me && state.me.id) && !video.notified.has(v.id)) {
+        video.notified.add(v.id);
+        banner(v.ownerName + ' chiede di mostrare un video: "' + v.label + '". Guardalo e decidi.', false);
+        if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
+      }
+    }
+    renderVideos();
+    if (window.intercomVideo && window.intercomVideo.onchange) window.intercomVideo.onchange();
+  }
+
+  function attachVideo(track, stream) {
+    if (!stream || !stream.id.startsWith('v:')) return;
+    const id = stream.id.slice(2);
+    video.remote.set(id, stream);
+    const gone = () => { if (video.remote.get(id) === stream && stream.getVideoTracks().length === 0) { video.remote.delete(id); renderVideos(); } };
+    stream.onremovetrack = gone;
+    track.onended = gone;
+    renderVideos();
+  }
+
+  function setVideoQuality(q) {
+    video.q = q;
+    saveJSON('intercom.videoQ', q);
+    send({ type: 'videoQuality', quality: q });
+    renderVideos();
+  }
+
+  // Riquadri: i miei video (anteprima locale) e quelli ricevuti.
+  function renderVideos() {
+    const box = videoBox();
+    if (!box) return;
+    const items = [];
+    for (const loc of video.local.values()) {
+      const info = video.list.find((v) => v.id === loc.id);
+      items.push({ key: 'L' + loc.ref, stream: loc.stream, mine: true, loc, info, label: loc.label });
+    }
+    for (const v of video.list) {
+      const st = video.remote.get(v.id);
+      if (st) items.push({ key: 'R' + v.id, stream: st, mine: false, info: v, label: v.label });
+    }
+    const keep = new Set(items.map((i) => i.key));
+    for (const [k, el] of video.tiles) if (!keep.has(k)) { el.remove(); video.tiles.delete(k); }
+    for (const it of items) {
+      let tile = video.tiles.get(it.key);
+      if (!tile) {
+        tile = document.createElement('div');
+        tile.className = 'vtile';
+        const vid = document.createElement('video');
+        vid.autoplay = true;
+        vid.muted = true;
+        vid.setAttribute('playsinline', '');
+        vid.addEventListener('click', () => openBigVideo(it.key));
+        const cap = document.createElement('div');
+        cap.className = 'vcap';
+        const act = document.createElement('div');
+        act.className = 'vact';
+        tile.append(vid, cap, act);
+        video.tiles.set(it.key, tile);
+      }
+      const vid = tile.querySelector('video');
+      if (vid.srcObject !== it.stream) { vid.srcObject = it.stream; vid.play().catch(() => {}); }
+      const v = it.info;
+      const pending = v && !v.approved;
+      tile.classList.toggle('pending', !!pending);
+      tile.classList.toggle('mine', it.mine);
+      tile.dataset.id = v ? v.id : '';
+      const cap = tile.querySelector('.vcap');
+      cap.textContent = '';
+      const t = document.createElement('b');
+      t.textContent = it.label;
+      const sub = document.createElement('span');
+      sub.textContent = it.mine
+        ? (pending ? 'in attesa di approvazione' : v ? 'stai trasmettendo' : 'avvio…')
+        : (v.ownerName ? v.ownerName + ' · ' : '') + (v.channels || []).map(chName).join(', ') + (pending ? ' · da approvare' : '');
+      cap.append(t, sub);
+      const act = tile.querySelector('.vact');
+      act.textContent = '';
+      const btn = (label, cls, fn) => { const b = document.createElement('button'); b.className = 'mini ' + cls; b.textContent = label; b.addEventListener('click', (e) => { e.stopPropagation(); fn(); }); act.appendChild(b); };
+      if (it.mine) btn('Ferma', 'danger', () => stopLocalVideo(it.loc.ref));
+      else if (v && canManageVideo(v)) {
+        if (pending) {
+          btn('Approva', 'primary', () => send({ type: 'videoApprove', stream: v.id, on: true }));
+          btn('Rifiuta', 'danger', () => send({ type: 'videoApprove', stream: v.id, on: false }));
+        } else {
+          btn('Ferma', 'danger', () => { if (confirm('Fermare il video "' + v.label + '"?')) send({ type: 'videoStop', stream: v.id }); });
+        }
+      }
+      box.appendChild(tile);
+    }
+    const empty = box.querySelector('.preview-empty');
+    if (empty) empty.classList.toggle('hidden', items.length > 0);
+    const wrap = $('videoWrap');
+    if (wrap) {
+      wrap.classList.toggle('has-video', items.length > 0);
+      wrap.querySelectorAll('[data-q]').forEach((b) => b.classList.toggle('sel', b.dataset.q === video.q));
+    }
+  }
+
+  // Video ingrandito: a schermo intero; in console chiede la qualità alta.
+  function openBigVideo(key) {
+    const tile = video.tiles.get(key);
+    if (!tile) return;
+    const src = tile.querySelector('video');
+    const id = tile.dataset.id;
+    const ov = document.createElement('div');
+    ov.className = 'overlay vbig';
+    const vid = document.createElement('video');
+    vid.autoplay = true;
+    vid.muted = true;
+    vid.setAttribute('playsinline', '');
+    vid.srcObject = src.srcObject;
+    const close = () => {
+      ov.remove();
+      if (isConsole && id && key[0] === 'R') send({ type: 'videoQuality', stream: id, quality: video.q });
+    };
+    ov.addEventListener('click', close);
+    ov.appendChild(vid);
+    document.body.appendChild(ov);
+    vid.play().catch(() => {});
+    if (isConsole && id && key[0] === 'R') send({ type: 'videoQuality', stream: id, quality: 'h' });
+    else if (vid.requestFullscreen) vid.requestFullscreen().catch(() => {});
+  }
+
+  // Telefono: "Mostra video" con la fotocamera.
+  function openStartVideoDialog() {
+    if (!state.me) return;
+    const ov = document.createElement('div');
+    ov.className = 'overlay';
+    const card = document.createElement('div');
+    card.className = 'card dialog';
+    card.innerHTML = '<h2 style="margin-top:0">Mostra un video</h2>';
+    const label = document.createElement('input');
+    label.type = 'text';
+    label.maxLength = 32;
+    label.value = 'Video di ' + state.name;
+    const lf = document.createElement('label');
+    lf.className = 'field';
+    lf.append('Titolo', label);
+    const chBox = document.createElement('div');
+    chBox.className = 'field';
+    chBox.append('Canale');
+    const mine = state.me.channels;
+    const preferred = mine.find((c) => !chInfo(c).main) || mine[0];
+    for (const c of mine) {
+      const l = document.createElement('label');
+      l.className = 'check';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = c;
+      cb.checked = c === preferred;
+      l.append(cb, ' ' + chName(c) + (isAdminOf(c) ? '' : ' (serve il consenso)'));
+      chBox.appendChild(l);
+    }
+    const camSel = document.createElement('select');
+    camSel.innerHTML = '<option value="environment">Fotocamera posteriore</option><option value="user">Fotocamera frontale</option>';
+    const cf = document.createElement('label');
+    cf.className = 'field';
+    cf.append('Fotocamera', camSel);
+    const go = document.createElement('button');
+    go.className = 'btn';
+    go.textContent = 'Avvia';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn secondary';
+    cancel.textContent = 'Annulla';
+    cancel.addEventListener('click', () => ov.remove());
+    go.addEventListener('click', async () => {
+      const chs = [...chBox.querySelectorAll('input:checked')].map((x) => x.value);
+      if (!chs.length) { alert('Scegli almeno un canale.'); return; }
+      go.disabled = true;
+      try {
+        await startLocalVideo({ facingMode: camSel.value, label: label.value.trim(), channels: chs });
+        ov.remove();
+      } catch (e) {
+        go.disabled = false;
+        alert('Fotocamera non disponibile (' + e.name + '). Controlla di aver premuto "Consenti".');
+      }
+    });
+    card.append(lf, chBox, cf, go, cancel);
+    ov.appendChild(card);
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  }
+
+  if ($('videoStartBtn')) $('videoStartBtn').addEventListener('click', openStartVideoDialog);
+  document.querySelectorAll('#videoWrap [data-q]').forEach((b) => b.addEventListener('click', () => setVideoQuality(b.dataset.q)));
+
+  // Per la console di regia (admin.js): sorgenti video dal browser.
+  window.intercomVideo = {
+    start: startLocalVideo,
+    stop: stopLocalVideo,
+    locals: () => [...video.local.values()].map((l) => ({ ref: l.ref, label: l.label, channels: l.channels, id: l.id })),
+    list: () => video.list,
+    myChannels: () => (state.me ? state.me.channels : []),
+    channelName: chName,
+    joined: () => !!state.me,
+    approve: (id, ok) => send({ type: 'videoApprove', stream: id, on: ok }),
+    stopRemote: (id) => send({ type: 'videoStop', stream: id }),
+    onchange: null,
+  };
 
   // ---------- Schermo sempre acceso ----------
   async function keepScreenOn() {

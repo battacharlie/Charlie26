@@ -1061,6 +1061,9 @@ func TestVideo(t *testing.T) {
 	regia.startVideo("Programma", "video", "audio")
 	pv := "v:" + expectMsg(t, regia, "videoStarted").Stream
 	expectVideo(t, fon) // canale Audio: video della regia non abilitato
+	// Il caporeparto non può fermare il video della regia.
+	capo.write(map[string]any{"type": "videoStop", "stream": strings.TrimPrefix(pv, "v:")})
+	expectMsg(t, capo, "error")
 	expectVideo(t, cam2, v1+"/L")
 	capo.write(map[string]any{"type": "channelSettings", "channel": "video", "micMode": "libero", "video": true})
 	expectVideo(t, cam2, v1+"/L", pv+"/L")

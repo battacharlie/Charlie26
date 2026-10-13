@@ -204,10 +204,74 @@
     logTimer = setInterval(refresh, 2000);
   }
 
+  // Video: sorgenti del browser della regia (schede di acquisizione,
+  // OBS Virtual Camera, vMix Video…) e richieste da approvare.
+  let videoDevices = [];
   function renderVideo(body) {
-    body.append(el('p', { class: 'muted' }, 'L\'invio del video della regia (da OBS via WHIP o da una sorgente del browser) arriva nella Fase 5. ' +
-      'Qui sceglierai le sorgenti e la qualità; le anteprime compariranno nella colonna di sinistra (massimo 15 fps).'));
-    body.append(el('p', { class: 'muted' }, 'Già da ora puoi decidere in quali canali arriverà il video: colonna "Video" nella scheda Canali.'));
+    const iv = window.intercomVideo;
+    if (!iv || !iv.joined()) {
+      body.append(el('p', { class: 'muted' }, 'Per inviare video apri prima il pannello intercom qui sotto ("Apri il pannello").'));
+      iv && (iv.onchange = () => { if (tab === 'video') render(); });
+      return;
+    }
+    iv.onchange = () => { if (tab === 'video') render(); };
+
+    body.append(el('h2', {}, 'Invia un video dal computer di regia'));
+    const devSel = el('select', {});
+    const fill = () => {
+      devSel.textContent = '';
+      if (!videoDevices.length) devSel.append(el('option', { value: '' }, 'Premi "Cerca periferiche"'));
+      for (const d of videoDevices) devSel.append(el('option', { value: d.deviceId }, d.label || 'Periferica video'));
+    };
+    fill();
+    const search = async () => {
+      try {
+        // Serve un primo permesso per conoscere i nomi delle periferiche.
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+        tmp.getTracks().forEach((t) => t.stop());
+      } catch (e) { notify('Accesso alle periferiche video negato (' + e.name + ')', true); }
+      videoDevices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      fill();
+      notify(videoDevices.length + ' periferiche video trovate');
+    };
+    const label = el('input', { type: 'text', placeholder: 'Titolo (es. Programma, Camera 2)', maxlength: '32', value: 'Programma' });
+    const chips = el('div', { class: 'chips' });
+    for (const c of iv.myChannels()) chips.append(el('label', {}, el('input', { type: 'checkbox', value: c, checked: true }), iv.channelName(c)));
+    const start = async () => {
+      const chs = [...chips.querySelectorAll('input:checked')].map((x) => x.value);
+      if (!devSel.value) { notify('Scegli una periferica', true); return; }
+      if (!chs.length) { notify('Scegli almeno un canale', true); return; }
+      try {
+        await iv.start({ deviceId: devSel.value, label: label.value.trim() || 'Video regia', channels: chs });
+        notify('Video avviato');
+      } catch (e) { notify('Impossibile avviare la periferica (' + e.name + ')', true); }
+    };
+    body.append(el('div', { class: 'row' }, devSel, el('button', { class: 'mini', onclick: search }, '🔍 Cerca periferiche')));
+    body.append(el('div', { class: 'row' }, label, el('button', { class: 'mini primary', onclick: start }, '▶ Avvia')));
+    body.append(el('div', { class: 'row' }, el('span', { class: 'small muted' }, 'Canali:'), chips));
+    body.append(el('p', { class: 'small muted' }, 'OBS: usa "Avvia fotocamera virtuale" e scegli OBS Virtual Camera. vMix: attiva l\'uscita "Virtual Camera" (vMix Video). ' +
+      'Il video arriva in un canale solo se il suo caporeparto ha attivato "Video della regia" (scheda Canali o ⚙).'));
+
+    const mine = iv.locals();
+    if (mine.length) {
+      body.append(el('h2', {}, 'Stai inviando'));
+      for (const l of mine) {
+        body.append(el('div', { class: 'model' },
+          el('div', { class: 'who' }, el('b', {}, l.label), el('span', { class: 'small muted' }, l.channels.map(iv.channelName).join(', '))),
+          el('button', { class: 'mini danger', onclick: () => iv.stop(l.ref) }, 'Ferma')));
+      }
+    }
+
+    const others = iv.list().filter((v) => !mine.some((l) => l.id === v.id));
+    body.append(el('h2', {}, 'Video dei partecipanti'));
+    if (!others.length) body.append(el('p', { class: 'small muted' }, 'Nessuno. Quando un tecnico chiede di mostrare un video compare qui (e nelle anteprime) per l\'approvazione.'));
+    for (const v of others) {
+      body.append(el('div', { class: 'model' },
+        el('div', { class: 'who' }, el('b', {}, v.label + (v.approved ? '' : ' — da approvare')),
+          el('span', { class: 'small muted' }, (v.ownerName || 'OBS') + ' · ' + (v.channels || []).map(iv.channelName).join(', '))),
+        v.approved ? null : el('button', { class: 'mini primary', onclick: () => iv.approve(v.id, true) }, 'Approva'),
+        el('button', { class: 'mini danger', onclick: () => (v.approved ? iv.stopRemote(v.id) : iv.approve(v.id, false)) }, v.approved ? 'Ferma' : 'Rifiuta')));
+    }
   }
 
   function renderChannels(body) {
