@@ -48,12 +48,15 @@ type Config struct {
 	Images immagini.Store
 	// Version è la versione del programma (mostrata in console).
 	Version string
+	// RemoteFile è il file dei telefoni abbinati come regia (vuoto = solo in memoria).
+	RemoteFile string
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
 type Server struct {
 	cfg      Config
 	upgrader websocket.Upgrader
+	remote   *remoteStore
 
 	hostMu sync.RWMutex
 	host   string // IP o nome a cui puntano i QR (cambiabile dalla console)
@@ -64,7 +67,7 @@ type Server struct {
 
 // New crea il server.
 func New(cfg Config) *Server {
-	return &Server{cfg: cfg, host: cfg.Host}
+	return &Server{cfg: cfg, host: cfg.Host, remote: newRemoteStore(cfg.RemoteFile)}
 }
 
 // Host restituisce l'IP o il nome usato nei QR.
@@ -124,6 +127,12 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/regia/modelli", s.onlyRegia(s.handleModelOp))
 	mux.HandleFunc("POST /api/regia/rete", s.onlyRegia(s.handleNetSet))
 	mux.HandleFunc("POST /api/regia/spegni", s.onlyRegia(s.handleShutdown))
+	mux.HandleFunc("POST /api/regia/abbina", s.onlyRegia(s.handlePairStart))
+	mux.HandleFunc("GET /qr/abbina.png", s.onlyRegia(s.handlePairQR))
+	mux.HandleFunc("GET /api/regia/dispositivi", s.onlyRegia(s.handleDevices))
+	mux.HandleFunc("POST /api/regia/dispositivi", s.onlyRegia(s.handleDevices))
+	mux.HandleFunc("POST /api/regia-remota/abbina", s.handlePair)
+	mux.HandleFunc("POST /api/regia-remota/esci", s.handleRemoteLogout)
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /regia/qr", s.onlyRegia(s.page("qr.html")))
 	mux.HandleFunc("GET /qr/utente/{user}", s.onlyRegia(s.handleUserQR))
@@ -202,6 +211,7 @@ func (s *Server) handleQR(w http.ResponseWriter, r *http.Request) {
 			}
 			text += "?canale=" + url.QueryEscape(ch)
 		}
+		text = s.withPin(text) // per l'app: impronta del certificato dell'evento
 	case "aiuto.png":
 		text = s.HelpURL()
 	default:
@@ -221,7 +231,7 @@ func (s *Server) handleUserQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeQR(w, s.AppURL()+"#accesso="+key)
+	writeQR(w, s.withPin(s.AppURL()+"#accesso="+key))
 }
 
 func (s *Server) channelExists(id string) bool {
@@ -406,10 +416,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil {
 				continue
 			}
-			// La regia può entrare solo dalla macchina di regia.
+			// La regia può entrare solo dalla macchina di regia o da un telefono abbinato.
 			if m.Regia && !isLoopback(r.RemoteAddr) {
-				send(sfu.Message{Type: "error", Error: "il pannello di regia funziona solo sul computer di regia"})
-				return
+				dev, ok := s.remoteDevice(r)
+				if !ok {
+					send(sfu.Message{Type: "error", Error: "il pannello di regia funziona solo sul computer di regia o su un telefono abbinato"})
+					time.Sleep(200 * time.Millisecond) // lascia partire il messaggio
+					return
+				}
+				defer s.remote.track(dev.ID, conn)()
 			}
 			if len(m.OwnerTokens) > 32 {
 				m.OwnerTokens = m.OwnerTokens[:32]

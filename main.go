@@ -181,20 +181,21 @@ func main() {
 	currentCert.Store(&tlsCert)
 
 	srv := server.New(server.Config{
-		Host:      host,
-		HTTPSPort: *httpsPort,
-		HTTPPort:  *httpPort,
-		CertMode:  certMode,
-		CAPEM:     caPEM,
-		Web:       web.FS,
-		Room:      room,
-		IPs:       ips,
-		Log:       reg.Lines,
-		Shutdown:  func() { quitOnce.Do(func() { close(quit) }) },
-		DetectIPs: netinfo.Detect,
-		ModelsDir: filepath.Join(*dataDir, "modelli"),
-		Images:    immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
-		Version:   version,
+		Host:       host,
+		HTTPSPort:  *httpsPort,
+		HTTPPort:   *httpPort,
+		CertMode:   certMode,
+		CAPEM:      caPEM,
+		Web:        web.FS,
+		Room:       room,
+		IPs:        ips,
+		Log:        reg.Lines,
+		Shutdown:   func() { quitOnce.Do(func() { close(quit) }) },
+		DetectIPs:  netinfo.Detect,
+		ModelsDir:  filepath.Join(*dataDir, "modelli"),
+		RemoteFile: filepath.Join(*dataDir, "regia-remota.json"),
+		Images:     immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
+		Version:    version,
 		ChangeIP: func(ip string) (string, error) {
 			newHost := ip
 			if certMode == "dominio" {
