@@ -99,11 +99,13 @@ func (s *Server) modelOp(op, name, file string) error {
 		if err := os.MkdirAll(s.cfg.ModelsDir, 0o700); err != nil {
 			return err
 		}
-		b, err := json.MarshalIndent(evento.ExportFile{
+		f := evento.ExportFile{
 			Tipo: evento.FileType, Versione: 1, Nome: name,
 			Esportato: time.Now().Format(time.RFC3339),
 			Evento:    s.cfg.Room.ExportEvent(),
-		}, "", "  ")
+		}
+		s.embedImages(&f) // il modello resta valido anche copiato su un altro computer
+		b, err := json.MarshalIndent(f, "", "  ")
 		if err != nil {
 			return err
 		}
@@ -121,11 +123,12 @@ func (s *Server) modelOp(op, name, file string) error {
 		if err != nil {
 			return errors.New("modello non trovato")
 		}
-		imported, err := evento.ParseExport(b)
+		f, err := evento.ParseExportFile(b)
 		if err != nil {
 			return err
 		}
-		return s.cfg.Room.UpdateEvent(func(e *evento.Event) error { *e = *imported; return nil })
+		s.storeImages(f, f.Evento)
+		return s.cfg.Room.UpdateEvent(func(e *evento.Event) error { *e = *f.Evento; return nil })
 	default:
 		return errors.New("operazione sconosciuta")
 	}

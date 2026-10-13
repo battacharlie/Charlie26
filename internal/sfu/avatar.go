@@ -1,13 +1,9 @@
 package sfu
 
 import (
-	"bytes"
-	"encoding/base64"
 	"errors"
-	"image"
-	_ "image/jpeg" // formati accettati per le foto profilo
-	_ "image/png"
-	"strings"
+
+	"github.com/battacharlie/charlie26/internal/immagini"
 )
 
 // Avatar predefiniti: i quattro mostriciattoli in web/avatars.
@@ -18,33 +14,14 @@ const (
 	maxAvatarSide  = 512
 )
 
-// parseAvatar controlla una foto inviata come data URL e restituisce i byte
-// e il tipo MIME. Accetta solo JPEG e PNG piccoli e davvero decodificabili.
+// parseAvatar controlla una foto inviata come data URL (solo JPEG e PNG
+// piccoli e davvero decodificabili).
 func parseAvatar(dataURL string) ([]byte, string, error) {
-	var mime string
-	switch {
-	case strings.HasPrefix(dataURL, "data:image/jpeg;base64,"):
-		mime = "image/jpeg"
-	case strings.HasPrefix(dataURL, "data:image/png;base64,"):
-		mime = "image/png"
-	default:
-		return nil, "", errors.New("formato immagine non supportato (servono JPEG o PNG)")
-	}
-	raw, err := base64.StdEncoding.DecodeString(dataURL[strings.Index(dataURL, ",")+1:])
+	raw, ext, err := immagini.Parse(dataURL, maxAvatarBytes, maxAvatarSide)
 	if err != nil {
-		return nil, "", errors.New("immagine non leggibile")
+		return nil, "", err
 	}
-	if len(raw) > maxAvatarBytes {
-		return nil, "", errors.New("immagine troppo grande")
-	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil || "image/"+format != mime {
-		return nil, "", errors.New("il file non è un'immagine valida")
-	}
-	if cfg.Width > maxAvatarSide || cfg.Height > maxAvatarSide || cfg.Width == 0 || cfg.Height == 0 {
-		return nil, "", errors.New("immagine troppo grande")
-	}
-	return raw, mime, nil
+	return raw, map[string]string{"jpg": "image/jpeg", "png": "image/png"}[ext], nil
 }
 
 // SetAvatar imposta l'avatar: un mostriciattolo predefinito ("m1"…"m4")

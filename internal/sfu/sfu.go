@@ -55,6 +55,7 @@ type Message struct {
 	Videos   []VideoInfo   `json:"videos,omitempty"`
 	Video    []VideoSlot   `json:"video,omitempty"`  // insieme all'offerta: linee video da usare per inviare
 	Stream   string        `json:"stream,omitempty"` // id di un flusso video
+	Look     *evento.Look  `json:"look,omitempty"`
 	Ref      string        `json:"ref,omitempty"`
 }
 
@@ -307,7 +308,8 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 
 	r.mu.Lock()
 	info := p.infoLocked()
-	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info, Videos: r.videoListLocked()}
+	look := r.event.Look
+	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info, Videos: r.videoListLocked(), Look: &look}
 	if newOwner != nil {
 		welcome.Channel, welcome.Token = newOwner.channel, newOwner.token
 	}

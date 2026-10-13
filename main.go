@@ -26,6 +26,7 @@ import (
 
 	"github.com/battacharlie/charlie26/internal/certs"
 	"github.com/battacharlie/charlie26/internal/evento"
+	"github.com/battacharlie/charlie26/internal/immagini"
 	"github.com/battacharlie/charlie26/internal/netinfo"
 	"github.com/battacharlie/charlie26/internal/registro"
 	"github.com/battacharlie/charlie26/internal/server"
@@ -192,6 +193,7 @@ func main() {
 		Shutdown:  func() { quitOnce.Do(func() { close(quit) }) },
 		DetectIPs: netinfo.Detect,
 		ModelsDir: filepath.Join(*dataDir, "modelli"),
+		Images:    immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
 		ChangeIP: func(ip string) (string, error) {
 			newHost := ip
 			if certMode == "dominio" {

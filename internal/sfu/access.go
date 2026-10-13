@@ -47,12 +47,14 @@ type JoinRequest struct {
 
 // ChannelInfo è la parte pubblica di un canale.
 type ChannelInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Main      bool   `json:"main,omitempty"`
-	MicMode   string `json:"micMode"`
-	Video     bool   `json:"video"`
-	Protected bool   `json:"protected,omitempty"` // serve una password per entrare
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	Main      bool        `json:"main,omitempty"`
+	MicMode   string      `json:"micMode"`
+	Video     bool        `json:"video"`
+	Protected bool        `json:"protected,omitempty"` // serve una password per entrare
+	Icon      string      `json:"icon,omitempty"`
+	Look      evento.Look `json:"look"`
 }
 
 // Errori mostrati all'utente.
@@ -206,7 +208,7 @@ func (r *Room) canTalkLocked(p *Peer, c string) bool {
 func (r *Room) channelInfoLocked() []ChannelInfo {
 	out := make([]ChannelInfo, 0, len(r.event.Channels))
 	for _, c := range r.event.Channels {
-		out = append(out, ChannelInfo{ID: c.ID, Name: c.Name, Main: c.Main, MicMode: c.MicMode, Video: c.Video, Protected: c.PasswordHash != ""})
+		out = append(out, ChannelInfo{ID: c.ID, Name: c.Name, Main: c.Main, MicMode: c.MicMode, Video: c.Video, Protected: c.PasswordHash != "", Icon: c.Icon, Look: c.Look})
 	}
 	return out
 }
@@ -216,6 +218,21 @@ func (r *Room) Channels() []ChannelInfo {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.channelInfoLocked()
+}
+
+// Look restituisce lo sfondo generale dell'evento.
+func (r *Room) Look() evento.Look {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.event.Look
+}
+
+// CanAdminChannel: il partecipante è responsabile del canale?
+func (p *Peer) CanAdminChannel(channel string) bool {
+	r := p.room
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return p.admin[channel]
 }
 
 // Mode restituisce la modalità di accesso.
@@ -533,8 +550,9 @@ func (r *Room) refreshLocked() {
 
 func (r *Room) broadcastChannelsLocked() {
 	chs := r.channelInfoLocked()
+	look := r.event.Look // copia: il messaggio viene scritto più tardi, senza lock
 	for _, p := range r.peers {
-		p.send(Message{Type: "channels", Channels: chs, Mode: r.event.Mode})
+		p.send(Message{Type: "channels", Channels: chs, Mode: r.event.Mode, Look: &look})
 	}
 }
 

@@ -3,7 +3,10 @@ package server
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"io"
 	"net"
 	"net/http"
@@ -23,6 +26,7 @@ import (
 
 	"github.com/battacharlie/charlie26/internal/certs"
 	"github.com/battacharlie/charlie26/internal/evento"
+	"github.com/battacharlie/charlie26/internal/immagini"
 	"github.com/battacharlie/charlie26/internal/netinfo"
 	"github.com/battacharlie/charlie26/internal/sfu"
 	"github.com/battacharlie/charlie26/web"
@@ -1174,4 +1178,104 @@ func TestWHIP(t *testing.T) {
 		t.Fatal("dopo DELETE il video deve sparire")
 	}
 	expectVideo(t, regia)
+}
+
+func testImage(t *testing.T, w, h int) string {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(b.Bytes())
+}
+
+func TestLook(t *testing.T) {
+	ev := credentialsEvent(t)
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t), Event: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+	local, _ := certs.EnsureLocal(t.TempDir(), []string{"127.0.0.1"})
+	store := immagini.Store{Dir: filepath.Join(t.TempDir(), "immagini")}
+	srv := New(Config{Host: "127.0.0.1", HTTPSPort: 8443, Web: web.FS, Room: room, Images: store})
+	ts := httptest.NewUnstartedServer(srv.HTTPSHandler())
+	ts.TLS = TLSConfig(local.Server)
+	ts.StartTLS()
+	defer ts.Close()
+	postJSON := func(path string, v any) int {
+		b, _ := json.Marshal(v)
+		resp, err := ts.Client().Post(ts.URL+path, "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// La regia: sfondo generale con colore e immagine.
+	if code := postJSON("/api/regia/aspetto", map[string]any{"color": "#123456", "imageData": testImage(t, 800, 450)}); code != 200 {
+		t.Fatalf("sfondo: %d", code)
+	}
+	look := room.Look()
+	if look.Color != "#123456" || look.Image == "" {
+		t.Fatalf("sfondo non salvato: %+v", look)
+	}
+	resp, _ := ts.Client().Get(ts.URL + "/img/" + look.Image)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("immagine servita: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if code := postJSON("/api/regia/aspetto", map[string]any{"color": "rosso"}); code != 400 {
+		t.Fatal("colore non valido accettato")
+	}
+
+	// Il caporeparto cambia l'icona del suo canale; un tecnico non può.
+	user := func(u string) map[string]any { return map[string]any{"session": login(t, ts, u, "pass-"+u)} }
+	capo := newFakePhone(t, ts, "CapoVideo", user("capovideo"))
+	cam := newFakePhone(t, ts, "Cam1", user("cam1"))
+	capo.write(map[string]any{"type": "channelLook", "channel": "video", "iconData": testImage(t, 128, 128), "color": "#202020"})
+	cam.write(map[string]any{"type": "channelLook", "channel": "video", "icon": "m3"})
+	expectMsg(t, cam, "error")
+	capo.write(map[string]any{"type": "channelLook", "channel": "produzione", "icon": "m2"})
+	expectMsg(t, capo, "error") // Produzione è della regia
+	deadline := time.Now().Add(3 * time.Second)
+	var vch sfu.ChannelInfo
+	for time.Now().Before(deadline) {
+		for _, c := range room.Channels() {
+			if c.ID == "video" {
+				vch = c
+			}
+		}
+		if vch.Icon != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !store.Exists(vch.Icon) || vch.Look.Color != "#202020" {
+		t.Fatalf("icona del canale: %+v", vch)
+	}
+
+	// Export con le immagini, import su un "altro computer" (archivio vuoto).
+	resp, _ = ts.Client().Get(ts.URL + "/api/regia/esporta")
+	exported, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var f evento.ExportFile
+	_ = json.Unmarshal(exported, &f)
+	if len(f.Immagini) != 2 {
+		t.Fatalf("l'export deve contenere 2 immagini, ne ha %d", len(f.Immagini))
+	}
+	room2, _ := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t)})
+	defer room2.Close()
+	store2 := immagini.Store{Dir: filepath.Join(t.TempDir(), "altro")}
+	ts2 := httptest.NewTLSServer(New(Config{Host: "127.0.0.1", HTTPSPort: 8443, Web: web.FS, Room: room2, Images: store2}).HTTPSHandler())
+	defer ts2.Close()
+	r2, err := ts2.Client().Post(ts2.URL+"/api/regia/importa", "application/json", bytes.NewReader(exported))
+	if err != nil || r2.StatusCode != 200 {
+		t.Fatalf("import: %v %v", err, r2)
+	}
+	r2.Body.Close()
+	if !store2.Exists(room2.Look().Image) || !store2.Exists(vch.Icon) {
+		t.Fatal("dopo l'import le immagini devono esistere anche sull'altro computer")
+	}
 }

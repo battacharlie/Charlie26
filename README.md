@@ -82,6 +82,11 @@ Ci possono essere **più video contemporaneamente**, ognuno destinato a uno o pi
 - **vMix**: il modo più semplice è l'uscita *Virtual Camera* di vMix, da scegliere nella scheda *Video* della console.
 - Latenza tipica in rete locale: qualche decimo di secondo.
 
+## Personalizzazione
+- **Sfondo dell'evento** (console, scheda *Evento → Aspetto*): colore e/o immagine per la pagina di accesso e le pagine dei tecnici. Sull'immagine viene steso un velo scuro, così i comandi restano leggibili al buio.
+- **Icona e sfondo di ogni canale** (console, scheda *Canali*, pulsante 🎨; oppure il caporeparto con ⚙ → *Icona e sfondo del canale*): uno dei quattro mostriciattoli o un'immagine caricata, più colore e/o immagine di sfondo. Chi è in un solo canale (e il caporeparto, per il suo reparto) vede lo sfondo del canale.
+- Le immagini vengono ridotte sul dispositivo prima dell'invio e salvate nella cartella `immagini` dei dati; viaggiano dentro i file esportati e i modelli, quindi una configurazione portata su un altro computer resta completa.
+
 ## Avatar
 All'ingresso ognuno sceglie un avatar: uno dei quattro mostriciattoli (Bit, Byte, Pixel, Glitch) oppure una **foto** (📷). La foto viene ritagliata e ridotta sul telefono a pochi KB prima dell'invio. Si cambia anche da collegati, toccando il proprio avatar in alto.
 
@@ -140,7 +145,7 @@ Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
 
-Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), la cartella `modelli` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
+Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), le cartelle `modelli` e `immagini` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
 ### Certificato di dominio (nessun avviso sui telefoni)
 Se hai un certificato valido per un dominio (es. wildcard `*.intercom.tuodominio.it`) e un DNS che risolve `192-168-1-10.intercom.tuodominio.it` su `192.168.1.10`:

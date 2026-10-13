@@ -40,6 +40,15 @@
     render();
   }
 
+  async function postLook(change, okText) {
+    const r = await fetch('/api/regia/aspetto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) });
+    const out = await r.json();
+    if (!r.ok) { notify(out.error || 'Salvataggio non riuscito', true); return; }
+    ev = out;
+    render();
+    notify(okText);
+  }
+
   async function op(body, okText) {
     const r = await fetch('/api/regia/evento', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const out = await r.json();
@@ -93,6 +102,19 @@
       modes.append(el('label', { class: ev.mode === mode ? 'sel' : '' }, radio, el('b', {}, title), el('div', { class: 'small muted' }, desc)));
     }
     body.append(modes);
+
+    // Aspetto delle pagine dei tecnici
+    body.append(el('h2', {}, 'Aspetto delle pagine dei tecnici'));
+    const sw = el('span', { class: 'swatch' });
+    sw.style.background = ev.look && ev.look.image
+      ? 'url(/img/' + ev.look.image + ') center / cover, ' + (ev.look.color || '#0d0f12')
+      : ((ev.look && ev.look.color) || '#0d0f12');
+    body.append(el('div', { class: 'row' }, sw,
+      el('button', { class: 'mini primary', onclick: () => window.intercomLook.open({
+        title: 'Sfondo delle pagine dei tecnici', withIcon: false, look: ev.look || {},
+        onSave: (ch) => postLook(Object.assign({ id: '' }, ch), 'Sfondo salvato'),
+      }) }, '🎨 Colore o immagine di sfondo'),
+      el('span', { class: 'small muted' }, 'Vale per la pagina di accesso e per chi non ha uno sfondo del proprio canale.')));
 
     // Modelli salvati sul computer di regia
     body.append(el('h2', {}, 'Modelli di evento'));
@@ -308,7 +330,7 @@
   function renderChannels(body) {
     const cred = ev.mode === 'credenziali';
     const ct = el('table', {}, el('tr', {},
-      el('th', {}, 'Nome'), el('th', {}, 'Microfono utenti'), el('th', {}, 'Video'),
+      el('th', {}, ''), el('th', {}, 'Nome'), el('th', {}, 'Microfono utenti'), el('th', {}, 'Video'),
       cred ? null : el('th', {}, 'Password'), el('th', {}, '')));
     for (const c of ev.channels) {
       const name = el('input', { type: 'text', value: c.name, maxlength: '24' });
@@ -332,7 +354,12 @@
       }
       const del = c.main ? el('span', { class: 'small muted' }, 'principale')
         : el('button', { class: 'mini danger', onclick: () => { if (confirm('Eliminare il canale ' + c.name + '? Chi ne fa parte ne verrà tolto.')) op({ op: 'removeChannel', id: c.id }, 'Canale eliminato'); } }, 'Elimina');
-      ct.append(el('tr', {}, el('td', {}, name), el('td', {}, mic), el('td', {}, video), pwd, el('td', {}, del)));
+      const icon = c.icon ? el('img', { class: 'chan-icon', alt: '', src: /^m[1-4]$/.test(c.icon) ? '/static/avatars/' + c.icon + '.svg' : '/img/' + c.icon }) : null;
+      const look = el('button', { class: 'mini', title: 'Icona e sfondo del canale', onclick: () => window.intercomLook.open({
+        title: 'Aspetto di ' + c.name, withIcon: true, icon: c.icon || '', look: c.look || {},
+        onSave: (ch) => postLook(Object.assign({ id: c.id }, ch), 'Aspetto del canale salvato'),
+      }) }, icon || '🎨');
+      ct.append(el('tr', {}, el('td', {}, look), el('td', {}, name), el('td', {}, mic), el('td', {}, video), pwd, el('td', {}, del)));
     }
     body.append(el('div', { class: 'scroll' }, ct));
     const newCh = el('input', { type: 'text', placeholder: 'Nuovo canale (es. Palco)', maxlength: '24' });

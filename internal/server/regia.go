@@ -72,12 +72,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	e := s.cfg.Room.ExportEvent()
-	b, err := json.MarshalIndent(evento.ExportFile{
+	f := evento.ExportFile{
 		Tipo:      evento.FileType,
 		Versione:  1,
 		Esportato: time.Now().Format(time.RFC3339),
 		Evento:    e,
-	}, "", "  ")
+	}
+	s.embedImages(&f)
+	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -94,12 +96,13 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file troppo grande"})
 		return
 	}
-	imported, err := evento.ParseExport(b)
+	f, err := evento.ParseExportFile(b)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.cfg.Room.UpdateEvent(func(e *evento.Event) error { *e = *imported; return nil }); err != nil {
+	s.storeImages(f, f.Evento)
+	if err := s.cfg.Room.UpdateEvent(func(e *evento.Event) error { *e = *f.Evento; return nil }); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -156,6 +159,20 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(300 * time.Millisecond) // lascia arrivare la risposta
 		s.cfg.Shutdown()
 	}()
+}
+
+// handleLook: la regia cambia l'aspetto dell'evento o di un canale.
+func (s *Server) handleLook(w http.ResponseWriter, r *http.Request) {
+	var c lookChange
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&c); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "richiesta non valida"})
+		return
+	}
+	if err := s.applyLookChange(c); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cfg.Room.Event())
 }
 
 func (s *Server) handleEventGet(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -45,9 +46,59 @@ type Channel struct {
 	MicMode string `json:"micMode"`
 	Video   bool   `json:"video"` // il flusso video della regia arriva in questo canale (Fase 5)
 
+	// Aspetto: icona ("m1"…"m4" o immagine caricata) e sfondo per chi è nel canale.
+	Icon string `json:"icon,omitempty"`
+	Look Look   `json:"look"`
+
 	// Solo in libero accesso: password del sottocanale e chi lo amministra.
 	PasswordHash string   `json:"passwordHash,omitempty"`
 	OwnerHashes  []string `json:"ownerHashes,omitempty"` // sha256 dei gettoni di chi è caporeparto
+}
+
+// Look è lo sfondo di una pagina: un colore e/o un'immagine dell'archivio.
+type Look struct {
+	Color string `json:"color,omitempty"` // es. "#1a2b3c"
+	Image string `json:"image,omitempty"` // nome nell'archivio immagini
+}
+
+var colorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// Validate controlla colore e nome dell'immagine.
+func (l Look) Validate() error {
+	if l.Color != "" && !colorRE.MatchString(l.Color) {
+		return fmt.Errorf("colore non valido: %q", l.Color)
+	}
+	if l.Image != "" && !imageNameRE.MatchString(l.Image) {
+		return fmt.Errorf("immagine non valida: %q", l.Image)
+	}
+	return nil
+}
+
+var imageNameRE = regexp.MustCompile(`^[0-9a-f]{20}\.(jpg|png)$`)
+
+// ValidIcon: uno dei quattro mostriciattoli o un'immagine dell'archivio.
+func ValidIcon(icon string) bool {
+	switch icon {
+	case "", "m1", "m2", "m3", "m4":
+		return true
+	}
+	return imageNameRE.MatchString(icon)
+}
+
+// Images restituisce i nomi delle immagini usate dall'evento.
+func (e *Event) Images() []string {
+	var out []string
+	add := func(n string) {
+		if imageNameRE.MatchString(n) && !contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	add(e.Look.Image)
+	for _, c := range e.Channels {
+		add(c.Look.Image)
+		add(c.Icon)
+	}
+	return out
 }
 
 // User è un utente con credenziali.
@@ -68,6 +119,8 @@ type Event struct {
 	Mode     string    `json:"mode"`
 	Channels []Channel `json:"channels"`
 	Users    []User    `json:"users,omitempty"`
+	// Look è lo sfondo della pagina di accesso e delle pagine dei tecnici.
+	Look Look `json:"look"`
 	// WHIPToken è la chiave che OBS deve usare per inviare video (WHIP).
 	WHIPToken string `json:"whipToken,omitempty"`
 }
@@ -143,6 +196,12 @@ func (e *Event) Validate() error {
 		if c.Main {
 			mains++
 		}
+		if err := c.Look.Validate(); err != nil {
+			return fmt.Errorf("canale %s: %w", c.Name, err)
+		}
+		if !ValidIcon(c.Icon) {
+			return fmt.Errorf("canale %s: icona non valida", c.Name)
+		}
 		switch c.MicMode {
 		case MicLibero, MicPTT, MicAdmin:
 		case "":
@@ -153,6 +212,9 @@ func (e *Event) Validate() error {
 	}
 	if mains != 1 {
 		return fmt.Errorf("serve esattamente un canale principale, trovati %d", mains)
+	}
+	if err := e.Look.Validate(); err != nil {
+		return err
 	}
 	users := map[string]bool{}
 	for _, u := range e.Users {
@@ -404,6 +466,21 @@ type ExportFile struct {
 	Esportato string `json:"esportato"`
 	Nome      string `json:"nome,omitempty"` // nome del modello (se salvato come modello)
 	Evento    *Event `json:"evento"`
+	// Immagini usate (sfondi, icone), per portarle su un altro computer:
+	// nome -> data URL.
+	Immagini map[string]string `json:"immagini,omitempty"`
+}
+
+// ParseExportFile è come ParseExport ma restituisce anche le immagini incluse.
+func ParseExportFile(b []byte) (*ExportFile, error) {
+	e, err := ParseExport(b)
+	if err != nil {
+		return nil, err
+	}
+	var f ExportFile
+	_ = json.Unmarshal(b, &f)
+	f.Evento = e
+	return &f, nil
 }
 
 // ParseExport legge un file esportato (accetta anche un evento.json "nudo").

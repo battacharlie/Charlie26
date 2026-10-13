@@ -19,6 +19,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/battacharlie/charlie26/internal/immagini"
 	"github.com/battacharlie/charlie26/internal/netinfo"
 	"github.com/battacharlie/charlie26/internal/sfu"
 )
@@ -43,6 +44,8 @@ type Config struct {
 	DetectIPs func() []netinfo.Address
 	// ModelsDir è la cartella dei modelli di evento (vuota = funzione non disponibile).
 	ModelsDir string
+	// Images è l'archivio delle immagini caricate (sfondi, icone).
+	Images immagini.Store
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
@@ -104,6 +107,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /avatar/{id}", s.handleAvatar)
+	mux.HandleFunc("GET /img/{name}", s.handleImage)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/regia/evento", s.onlyRegia(s.handleEventGet))
 	mux.HandleFunc("POST /api/regia/evento", s.onlyRegia(s.handleEventChange))
@@ -112,6 +116,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("GET /api/regia/registro", s.onlyRegia(s.handleLog))
 	mux.HandleFunc("GET /api/regia/rete", s.onlyRegia(s.handleNetGet))
 	mux.HandleFunc("GET /api/regia/whip", s.onlyRegia(s.handleWHIPInfo))
+	mux.HandleFunc("POST /api/regia/aspetto", s.onlyRegia(s.handleLook))
 	mux.HandleFunc("POST /api/regia/whip", s.onlyRegia(s.handleWHIPInfo))
 	mux.HandleFunc("GET /api/regia/modelli", s.onlyRegia(s.handleModels))
 	mux.HandleFunc("POST /api/regia/modelli", s.onlyRegia(s.handleModelOp))
@@ -247,6 +252,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"peers":    s.cfg.Room.Peers(),
 		"channels": s.cfg.Room.Channels(),
 		"mode":     s.cfg.Room.Mode(),
+		"look":     s.cfg.Room.Look(),
 	})
 }
 
@@ -283,6 +289,18 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(img)
 }
 
+func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
+	b, mime, err := s.cfg.Images.Read(r.PathValue("name"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Cache-Control", "max-age=31536000, immutable") // il nome dipende dal contenuto
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	_, _ = w.Write(b)
+}
+
 // clientMsg è un messaggio dal browser.
 type clientMsg struct {
 	Type        string                   `json:"type"`
@@ -304,6 +322,11 @@ type clientMsg struct {
 	Ref         string                   `json:"ref"`
 	Label       string                   `json:"label"`
 	Quality     string                   `json:"quality"`
+	Icon        string                   `json:"icon"`
+	IconData    string                   `json:"iconData"`
+	Color       string                   `json:"color"`
+	ImageData   string                   `json:"imageData"`
+	ClearImage  bool                     `json:"clearImage"`
 	SDP         string                   `json:"sdp"`
 	Candidate   *webrtc.ICECandidateInit `json:"candidate"`
 	On          bool                     `json:"on"`
@@ -443,6 +466,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					send(sfu.Message{Type: "error", Error: err.Error()})
 				}
+			}
+		case "channelLook":
+			// Il caporeparto cambia icona e sfondo del suo canale.
+			if peer == nil {
+				continue
+			}
+			if !peer.CanAdminChannel(m.Channel) {
+				send(sfu.Message{Type: "error", Error: sfu.ErrNotAllowed.Error()})
+				continue
+			}
+			lc := lookChange{ID: m.Channel, Icon: m.Icon, IconData: m.IconData, Color: m.Color, ImageData: m.ImageData, ClearImage: m.ClearImage}
+			if err := s.applyLookChange(lc); err != nil {
+				send(sfu.Message{Type: "error", Error: err.Error()})
 			}
 		case "videoChannels":
 			if peer != nil {

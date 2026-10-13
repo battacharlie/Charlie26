@@ -182,6 +182,8 @@
     return fetch('/api/info').then((r) => r.json()).then((info) => {
       state.channels = info.channels || [];
       state.mode = info.mode;
+      state.look = info.look || {};
+      applyBackground();
       if (!isConsole) prepareJoinForm();
     }).catch(() => showJoinError('Server non raggiungibile. Ricarica la pagina.'));
   }
@@ -348,6 +350,7 @@
     $('joinView').classList.remove('hidden');
     $('channelList').textContent = '';
     $('bigMicArea').textContent = '';
+    applyBackground();
     if (message) showJoinError(message);
     loadInfo(); // i canali potrebbero essere cambiati
   }
@@ -414,6 +417,8 @@
         case 'channels':
           state.channels = m.channels || [];
           state.mode = m.mode;
+          if (m.look) state.look = m.look;
+          applyBackground();
           requestRebuild();
           break;
         case 'mute':
@@ -471,6 +476,7 @@
 
   function onWelcome(m) {
     if (m.channels) state.channels = m.channels;
+    if (m.look) state.look = m.look;
     if (m.mode) state.mode = m.mode;
     if (m.token && m.channel) {
       // Ho creato un canale: da ora in poi rientro direttamente lì.
@@ -647,6 +653,8 @@
       head.className = 'chan-head';
       head.innerHTML = '<span class="chan-name"></span><span class="chan-who"></span>';
       head.querySelector('.chan-name').textContent = chName(id);
+      const ic = chanIcon(id);
+      if (ic) head.prepend(ic);
       if (isAdminOf(id) && (!chInfo(id).main || state.me.role === 'regia')) {
         const gear = document.createElement('button');
         gear.className = 'gear';
@@ -697,6 +705,7 @@
       list.appendChild(row);
     });
 
+    applyBackground();
     if (!multi && mine.length) {
       // Un solo canale: il grande pulsante rotondo.
       const btn = document.createElement('button');
@@ -748,6 +757,18 @@
       send({ type: 'channelSettings', channel: id, micMode: chInfo(id).micMode, video: e.target.checked });
     });
     box.appendChild(video);
+
+    const lookBtn = document.createElement('button');
+    lookBtn.className = 'mini';
+    lookBtn.textContent = '🎨 Icona e sfondo del canale';
+    lookBtn.addEventListener('click', () => {
+      const c = chInfo(id);
+      openLookDialog({
+        title: 'Aspetto di ' + chName(id), withIcon: true, icon: c.icon || '', look: c.look || {},
+        onSave: (ch) => send(Object.assign({ type: 'channelLook', channel: id }, ch)),
+      });
+    });
+    box.appendChild(lookBtn);
 
     const users = document.createElement('ul');
     users.className = 'members';
@@ -1357,6 +1378,170 @@
     setChannels: (id, chs) => send({ type: 'videoChannels', stream: id, channels: chs }),
     onchange: null,
   };
+
+  // ---------- Aspetto: sfondi e icone dei canali ----------
+  state.look = {};
+  const lookCSS = (l) => {
+    if (!l || (!l.color && !l.image)) return '';
+    const parts = [];
+    // Velatura scura sopra l'immagine: i comandi restano leggibili.
+    if (l.image) parts.push('linear-gradient(rgba(13,15,18,.72), rgba(13,15,18,.86))', 'url(/img/' + encodeURIComponent(l.image) + ') center / cover no-repeat fixed');
+    return (parts.length ? parts.join(', ') + ' ' : '') + (l.color || '');
+  };
+  // Sfondo: quello del canale per chi ne ha uno solo (o del proprio reparto
+  // per il caporeparto), altrimenti quello dell'evento.
+  function applyBackground() {
+    if (isConsole) return;
+    let l = state.look;
+    if (state.joined && state.me) {
+      const mine = state.me.channels.map(chInfo);
+      const own = mine.length === 1 ? mine[0] : mine.find((c) => !c.main && c.look && (c.look.color || c.look.image));
+      if (own && own.look && (own.look.color || own.look.image)) l = own.look;
+    }
+    document.body.style.background = lookCSS(l) || '';
+  }
+  function chanIcon(id) {
+    const ic = chInfo(id).icon;
+    if (!ic) return null;
+    const img = document.createElement('img');
+    img.className = 'chan-icon';
+    img.alt = '';
+    img.src = PRESETS.includes(ic) ? '/static/avatars/' + ic + '.svg' : '/img/' + encodeURIComponent(ic);
+    return img;
+  }
+
+  // Ridimensiona un'immagine sul dispositivo prima dell'invio.
+  async function shrinkImage(file, maxSide, square) {
+    const bmp = await createImageBitmap(file);
+    let sx = 0, sy = 0, sw = bmp.width, sh = bmp.height;
+    if (square) { const m = Math.min(sw, sh); sx = (sw - m) / 2; sy = (sh - m) / 2; sw = sh = m; }
+    const k = Math.min(1, maxSide / Math.max(sw, sh));
+    const c = document.createElement('canvas');
+    c.width = Math.round(sw * k);
+    c.height = Math.round(sh * k);
+    c.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    let q = 0.85;
+    let url = c.toDataURL('image/jpeg', q);
+    const limit = square ? 90000 : 800000;
+    while (url.length * 0.75 > limit && q > 0.4) { q -= 0.1; url = c.toDataURL('image/jpeg', q); }
+    return url;
+  }
+
+  // Finestra "Aspetto": icona (per i canali) e sfondo colore/immagine.
+  function openLookDialog(o) {
+    const ov = document.createElement('div');
+    ov.className = 'overlay';
+    const card = document.createElement('div');
+    card.className = 'card dialog';
+    const h = document.createElement('h2');
+    h.style.marginTop = '0';
+    h.textContent = o.title;
+    card.appendChild(h);
+    const ch = { icon: 'keep', color: (o.look && o.look.color) || '' };
+    const preview = document.createElement('div');
+    preview.className = 'look-preview';
+    let previewImg = o.look && o.look.image ? '/img/' + o.look.image : '';
+    const paint = () => {
+      preview.style.background = (previewImg ? 'linear-gradient(rgba(13,15,18,.72), rgba(13,15,18,.86)), url(' + previewImg + ') center / cover, ' : '') + (ch.color || 'var(--bg)');
+    };
+    if (o.withIcon) {
+      const lbl = document.createElement('div');
+      lbl.className = 'small muted';
+      lbl.textContent = 'Icona';
+      const row = document.createElement('div');
+      row.className = 'avatar-picker';
+      const choices = ['', ...PRESETS, 'upload'];
+      const mark = (val) => row.querySelectorAll('button').forEach((b) => b.classList.toggle('sel', b.dataset.v === val));
+      for (const v of choices) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.v = v;
+        if (v === '') b.innerHTML = '<span class="foto-icon">∅</span>';
+        else if (v === 'upload') b.innerHTML = '<span class="foto-icon">🖼</span>';
+        else b.appendChild(avatarImg({ avatar: v }));
+        b.addEventListener('click', () => {
+          if (v === 'upload') { iconFile.click(); return; }
+          ch.icon = v; delete ch.iconData; mark(v);
+        });
+        row.appendChild(b);
+      }
+      const iconFile = document.createElement('input');
+      iconFile.type = 'file';
+      iconFile.accept = 'image/*';
+      iconFile.className = 'hidden';
+      iconFile.addEventListener('change', async () => {
+        const f = iconFile.files[0];
+        if (!f) return;
+        try {
+          ch.iconData = await shrinkImage(f, 256, true);
+          const up = row.querySelector('[data-v=upload]');
+          up.innerHTML = '';
+          const im = document.createElement('img');
+          im.className = 'avatar';
+          im.src = ch.iconData;
+          up.appendChild(im);
+          mark('upload');
+        } catch (_) { alert('Immagine non leggibile.'); }
+      });
+      mark(PRESETS.includes(o.icon) || o.icon === '' ? o.icon : 'upload');
+      if (o.icon && !PRESETS.includes(o.icon)) {
+        const up = row.querySelector('[data-v=upload]');
+        up.innerHTML = '<img class="avatar" src="/img/' + encodeURIComponent(o.icon) + '">';
+      }
+      card.append(lbl, row, iconFile);
+    }
+    const bgl = document.createElement('div');
+    bgl.className = 'small muted';
+    bgl.textContent = 'Sfondo';
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = ch.color || '#0d0f12';
+    color.addEventListener('input', () => { ch.color = color.value; paint(); });
+    const noColor = document.createElement('button');
+    noColor.className = 'mini';
+    noColor.textContent = 'Colore predefinito';
+    noColor.addEventListener('click', () => { ch.color = ''; paint(); });
+    const bgFile = document.createElement('input');
+    bgFile.type = 'file';
+    bgFile.accept = 'image/*';
+    bgFile.className = 'hidden';
+    const bgBtn = document.createElement('button');
+    bgBtn.className = 'mini';
+    bgBtn.textContent = '🖼 Immagine…';
+    bgBtn.addEventListener('click', () => bgFile.click());
+    bgFile.addEventListener('change', async () => {
+      const f = bgFile.files[0];
+      if (!f) return;
+      try {
+        ch.imageData = await shrinkImage(f, 1600, false);
+        ch.clearImage = false;
+        previewImg = ch.imageData;
+        paint();
+      } catch (_) { alert('Immagine non leggibile.'); }
+    });
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'mini';
+    clearBtn.textContent = 'Togli immagine';
+    clearBtn.addEventListener('click', () => { ch.clearImage = true; delete ch.imageData; previewImg = ''; paint(); });
+    const row2 = document.createElement('div');
+    row2.className = 'row look-row';
+    row2.append(color, noColor, bgBtn, clearBtn, bgFile);
+    preview.textContent = 'Anteprima';
+    paint();
+    const save = document.createElement('button');
+    save.className = 'btn';
+    save.textContent = 'Salva';
+    save.addEventListener('click', () => { o.onSave(ch); ov.remove(); });
+    const cancel = document.createElement('button');
+    cancel.className = 'btn secondary';
+    cancel.textContent = 'Annulla';
+    cancel.addEventListener('click', () => ov.remove());
+    card.append(bgl, row2, preview, save, cancel);
+    ov.appendChild(card);
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  }
+  window.intercomLook = { open: openLookDialog };
 
   // ---------- Schermo sempre acceso ----------
   async function keepScreenOn() {

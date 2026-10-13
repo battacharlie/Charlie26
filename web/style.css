@@ -364,3 +364,11 @@ a.mini { text-decoration: none; display: inline-block; }
 .previews .vtile { aspect-ratio: 16 / 9; }
 .previews .vact .mini { padding: .25rem .5rem; font-size: .72rem; }
 code.url { flex: 1; min-width: 0; background: #0a0c0f; border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem; font-size: .75rem; }
+
+/* ---------- Aspetto ---------- */
+body { background-attachment: fixed; }
+.chan-icon { width: 26px; height: 26px; border-radius: 7px; object-fit: cover; flex: none; align-self: center; }
+.look-row input[type=color] { width: 48px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: none; }
+.look-preview { height: 90px; border-radius: 10px; border: 1px solid var(--line); margin: .5rem 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.config td .chan-icon { width: 22px; height: 22px; }
+.swatch { width: 64px; height: 36px; border-radius: 8px; border: 1px solid var(--line); display: inline-block; flex: none; }
