@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0f12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Intercom</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Schermata di ingresso -->
+    <section class="join" id="joinView">
+      <h1>Intercom di produzione</h1>
+      <p class="muted">Scrivi il tuo nome e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
+      <input type="text" id="nameInput" placeholder="Il tuo nome (es. Marco – Cam 2)" autocomplete="nickname" maxlength="24">
+      <button class="btn" id="joinBtn">Entra</button>
+      <div class="banner error hidden" id="joinError"></div>
+    </section>
+
+    <!-- Schermata intercom -->
+    <section class="hidden" id="talkView" style="display:flex;flex-direction:column;flex:1">
+      <div class="topbar">
+        <span class="dot" id="connDot"></span>
+        <span class="channel">Produzione</span>
+        <span class="status" id="connText">connessione…</span>
+      </div>
+      <div class="banner hidden" id="talkBanner"></div>
+      <ul class="peers" id="peerList"></ul>
+      <div class="mic-area">
+        <button class="mic" id="micBtn" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+          <span id="micLabel">MUTO</span>
+        </button>
+        <div class="hint">Tocca per aprire/chiudere · Tieni premuto per parlare</div>
+      </div>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

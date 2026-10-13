@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Console di regia</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-role="regia">
+  <div class="console">
+    <aside>
+      <div class="card">
+        <h1>Console di regia</h1>
+        <p class="muted" style="margin-top:0">Fase 1 · canale unico</p>
+        <h2>QR per i tecnici</h2>
+        <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
+        <p class="url">{{APP_URL}}</p>
+        <div id="helpBox">
+          <h2>QR di aiuto certificato</h2>
+          <p class="muted">Da far inquadrare <b>prima</b> se il telefono mostra l'avviso "connessione non privata".</p>
+          <img class="qr" src="/qr/aiuto.png" alt="QR code della pagina di aiuto" style="max-width:180px">
+          <p class="url">{{HELP_URL}}</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="card">
+      <div class="app" id="app">
+        <section class="join" id="joinView" style="margin:0">
+          <h2 style="margin-top:0">Partecipa all'intercom da questo computer</h2>
+          <input type="text" id="nameInput" maxlength="24">
+          <button class="btn" id="joinBtn">Entra come regia</button>
+          <div class="banner error hidden" id="joinError"></div>
+        </section>
+        <section class="hidden" id="talkView" style="display:flex;flex-direction:column">
+          <div class="topbar">
+            <span class="dot" id="connDot"></span>
+            <span class="channel">Produzione</span>
+            <span class="status" id="connText">connessione…</span>
+          </div>
+          <div class="banner hidden" id="talkBanner"></div>
+          <ul class="peers" id="peerList"></ul>
+          <div class="mic-area">
+            <button class="mic" id="micBtn" aria-pressed="false" style="width:180px">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+              <span id="micLabel">MUTO</span>
+            </button>
+            <div class="hint">Clic per aprire/chiudere · tieni premuto, oppure <kbd>Spazio</kbd>, per parlare</div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    if ('{{CERT_MODE}}' !== 'locale') document.getElementById('helpBox').style.display = 'none';
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
