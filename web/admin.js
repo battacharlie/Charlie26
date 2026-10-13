@@ -5,6 +5,8 @@
   const $ = (id) => document.getElementById(id);
   const root = $('config');
   let ev = null;
+  let tab = 'evento';
+  try { tab = localStorage.getItem('regia.tab') || 'evento'; } catch (_) {}
 
   const micModes = [['libero', 'Libero'], ['ptt', 'Solo push-to-talk'], ['admin', 'Solo il caporeparto apre']];
 
@@ -51,11 +53,23 @@
     return true;
   }
 
+  function renderTabs() {
+    const nav = $('configTabs');
+    nav.textContent = '';
+    const cred = ev.mode === 'credenziali';
+    for (const [id, label] of [['evento', 'Evento'], ['canali', 'Canali (' + ev.channels.length + ')'], ['utenti', cred ? 'Utenti (' + (ev.users || []).length + ')' : 'Utenti'], ['video', 'Video']]) {
+      nav.append(el('button', { class: tab === id ? 'sel' : '', onclick: () => { tab = id; try { localStorage.setItem('regia.tab', id); } catch (_) {} render(); } }, label));
+    }
+  }
+
   function render() {
+    renderTabs();
     const body = $('configBody');
     body.textContent = '';
-    const cred = ev.mode === 'credenziali';
+    ({ evento: renderEvent, canali: renderChannels, utenti: renderUsers, video: renderVideo }[tab] || renderEvent)(body);
+  }
 
+  function renderEvent(body) {
     // Evento e modalità
     const nameIn = el('input', { type: 'text', value: ev.name, maxlength: '40' });
     body.append(el('div', { class: 'row' },
@@ -78,9 +92,16 @@
       modes.append(el('label', { class: ev.mode === mode ? 'sel' : '' }, radio, el('b', {}, title), el('div', { class: 'small muted' }, desc)));
     }
     body.append(modes);
+  }
 
-    // Canali
-    body.append(el('h2', {}, 'Canali'));
+  function renderVideo(body) {
+    body.append(el('p', { class: 'muted' }, 'L\'invio del video della regia (da OBS via WHIP o da una sorgente del browser) arriva nella Fase 5. ' +
+      'Qui sceglierai le sorgenti e la qualità; le anteprime compariranno nella colonna di sinistra (massimo 15 fps).'));
+    body.append(el('p', { class: 'muted' }, 'Già da ora puoi decidere in quali canali arriverà il video: colonna "Video" nella scheda Canali.'));
+  }
+
+  function renderChannels(body) {
+    const cred = ev.mode === 'credenziali';
     const ct = el('table', {}, el('tr', {},
       el('th', {}, 'Nome'), el('th', {}, 'Microfono utenti'), el('th', {}, 'Video'),
       cred ? null : el('th', {}, 'Password'), el('th', {}, '')));
@@ -114,7 +135,10 @@
     newCh.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCh(); });
     body.append(el('div', { class: 'row' }, newCh, el('button', { class: 'mini primary', onclick: addCh }, 'Aggiungi canale')));
 
-    // Utenti
+  }
+
+  function renderUsers(body) {
+    const cred = ev.mode === 'credenziali';
     if (!cred) {
       body.append(el('p', { class: 'small muted' }, 'Gli utenti con password servono solo nell\'accesso con credenziali.'));
       return;

@@ -8,44 +8,61 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-role="regia">
-  <div class="console">
-    <aside>
-      <div class="card">
+  <div class="desk">
+    <!-- Colonna sinistra: QR e anteprime video -->
+    <aside class="card side">
+      <div class="side-head">
         <h1>Console di regia</h1>
-        <p class="muted" style="margin-top:0">Fase 3 · ruoli e accessi</p>
-        <h2>QR per i tecnici</h2>
-        <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
-        <p class="url">{{APP_URL}}</p>
-        <div id="helpBox">
-          <h2>QR di aiuto certificato</h2>
-          <p class="muted">Da far inquadrare <b>prima</b> se il telefono mostra l'avviso "connessione non privata".</p>
-          <img class="qr" src="/qr/aiuto.png" alt="QR code della pagina di aiuto" style="max-width:180px">
-          <p class="url">{{HELP_URL}}</p>
-        </div>
+        <span class="muted small">Fase 3</span>
+      </div>
+      <div class="qr-pair">
+        <figure>
+          <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
+          <figcaption><b>Tecnici</b><span class="url">{{APP_URL}}</span></figcaption>
+        </figure>
+        <figure id="helpBox">
+          <img class="qr" src="/qr/aiuto.png" alt="QR code della pagina di aiuto">
+          <figcaption><b>Aiuto certificato</b><span class="small muted">se il telefono dice "connessione non privata"</span></figcaption>
+        </figure>
+      </div>
+      <h2>Anteprime video</h2>
+      <!-- Fase 5: un riquadro per ogni segnale inviato, aggiornato al massimo a 15 fps. -->
+      <div class="previews" id="previews">
+        <div class="preview-empty">Nessun segnale video.<br><span class="small">Le anteprime dei segnali inviati ai canali compariranno qui (Fase 5).</span></div>
       </div>
     </aside>
 
-    <main class="card">
+    <!-- In alto a destra: configurazione dell'evento -->
+    <section class="card config" id="config">
+      <div class="config-head">
+        <h1>Configurazione</h1>
+        <nav class="tabs" id="configTabs"></nav>
+      </div>
+      <div class="banner hidden" id="configMsg"></div>
+      <div class="config-body" id="configBody"></div>
+    </section>
+
+    <!-- In basso a destra: intercom -->
+    <main class="card intercom">
       <div class="app" id="app">
-        <section class="join" id="joinView" style="margin:0">
+        <section class="join" id="joinView">
           <h2 style="margin-top:0">Pannello intercom della regia</h2>
           <p class="muted">La regia ascolta tutti i canali e può parlare a uno, a più canali o a tutti.</p>
-          <label class="field">Nome
-            <input type="text" id="nameInput" maxlength="24">
-          </label>
-          <button class="btn" id="joinBtn">Apri il pannello</button>
+          <div class="row">
+            <input type="text" id="nameInput" maxlength="24" aria-label="Nome">
+            <button class="btn" id="joinBtn">Apri il pannello</button>
+          </div>
           <div class="banner error hidden" id="joinError"></div>
         </section>
         <section class="talk hidden" id="talkView">
           <div class="topbar">
             <span class="dot" id="connDot"></span>
             <span class="me" id="meLabel"></span>
+            <span class="small muted keys">Clic = apri/chiudi · tieni premuto = parla · <kbd>1</kbd>…<kbd>9</kbd> canali · <kbd>Spazio</kbd> tutti</span>
             <span class="status" id="connText">connessione…</span>
           </div>
           <div class="banner hidden" id="talkBanner"></div>
           <div class="channels" id="channelList"></div>
-          <p class="hint">Clic = apri/chiudi · tieni premuto = parla finché tieni.
-            Tastiera: <kbd>1</kbd>…<kbd>9</kbd> per i canali, <kbd>Spazio</kbd> per tutti.</p>
           <details class="people" open>
             <summary>Collegati (<span id="peerCount">0</span>)</summary>
             <ul class="peers" id="peerList"></ul>
@@ -54,12 +71,6 @@
         </section>
       </div>
     </main>
-
-    <section class="card config" id="config">
-      <h1>Configurazione evento</h1>
-      <div class="banner hidden" id="configMsg"></div>
-      <div id="configBody"></div>
-    </section>
   </div>
   <script>
     if ('{{CERT_MODE}}' !== 'locale') document.getElementById('helpBox').style.display = 'none';

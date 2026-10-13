@@ -176,25 +176,11 @@ input[type=text], input[type=password], select {
 }
 .banner.error { background: #3a1414; color: #ffb4b0; }
 
-/* ---------- Console di regia ---------- */
-.console {
-  display: grid;
-  grid-template-columns: minmax(280px, 380px) 1fr;
-  gap: 24px;
-  padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
+/* ---------- Elementi comuni ---------- */
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
 .qr { width: 100%; max-width: 300px; background: #fff; border-radius: 10px; padding: 8px; display: block; }
 .url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9rem; word-break: break-all; }
-.console .app { max-width: none; padding: 0; min-height: 0; }
-.console .peers { max-height: 40vh; overflow-y: auto; }
-.console .channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 kbd { background: #2a2e35; border-radius: 4px; padding: 0 .35rem; font-family: inherit; }
-@media (max-width: 760px) {
-  .console { grid-template-columns: 1fr; padding: 16px; }
-}
 
 /* ---------- Pagina di aiuto ---------- */
 .doc { max-width: 640px; margin: 0 auto; padding: 20px 16px 40px; }
@@ -235,8 +221,7 @@ body:not([data-role=regia]) .talk .switch { order: 3; }
 .peers li .mini { margin-left: .3rem; }
 
 /* Console: configurazione evento */
-.config { grid-column: 1 / -1; }
-.config h2 { margin-top: 1.4rem; }
+.config h2 { margin: 1rem 0 .4rem; }
 .config table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .config th { text-align: left; color: var(--muted); font-weight: 500; padding: .4rem; border-bottom: 1px solid var(--line); }
 .config td { padding: .35rem .4rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -251,3 +236,76 @@ body:not([data-role=regia]) .talk .switch { order: 3; }
 .config .modes label.sel { border-color: #2f6fed; background: #16264a; }
 .config .scroll { overflow-x: auto; }
 @media (max-width: 760px) { .config .modes { grid-template-columns: 1fr; } }
+
+/* ---------- Console di regia: tutto in uno schermo 16:9 ---------- */
+body[data-role=regia] { overflow: hidden; }
+.desk {
+  display: grid;
+  grid-template-columns: clamp(240px, 19vw, 330px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 42fr) minmax(0, 58fr);
+  grid-template-areas: "side config" "side intercom";
+  gap: 12px;
+  height: 100vh;
+  padding: 12px;
+}
+.desk > .card { min-height: 0; overflow: auto; padding: 14px 16px; }
+.side { grid-area: side; display: flex; flex-direction: column; }
+.config { grid-area: config; display: flex; flex-direction: column; }
+.intercom { grid-area: intercom; }
+.side-head { display: flex; align-items: baseline; gap: .5rem; }
+.side h2 { margin: 1rem 0 .5rem; font-size: 1rem; }
+.qr-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: .6rem; }
+.qr-pair figure { margin: 0; display: flex; flex-direction: column; gap: .3rem; }
+.qr-pair .qr { width: 100%; max-width: none; padding: 5px; border-radius: 8px; }
+.qr-pair figcaption { display: flex; flex-direction: column; font-size: .85rem; gap: .1rem; }
+.qr-pair .url { font-size: .7rem; }
+.previews { flex: 1; min-height: 120px; display: grid; grid-auto-rows: min-content; gap: 8px; }
+.preview-empty {
+  border: 1px dashed var(--line); border-radius: 10px; padding: 1rem; text-align: center;
+  color: var(--muted); aspect-ratio: 16 / 9; display: flex; flex-direction: column; justify-content: center;
+}
+.config-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.config-head h1 { margin: 0; font-size: 1.1rem; }
+.tabs { display: flex; gap: .3rem; }
+.tabs button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 8px; padding: .35rem .8rem; cursor: pointer; font-size: .9rem; }
+.tabs button.sel { background: #16264a; border-color: #2f6fed; color: var(--text); }
+.config .banner { margin: .5rem 0 0; padding: .4rem .7rem; }
+.config-body { flex: 1; min-height: 0; overflow: auto; margin-top: .5rem; }
+
+/* Intercom della regia: canali a sinistra, collegati a destra */
+.intercom .app { max-width: none; padding: 0; min-height: 100%; }
+.intercom .join { margin: 0; }
+.intercom .join .row { display: flex; gap: .6rem; }
+.intercom .join .btn { width: auto; margin: 0; padding: .8rem 1.4rem; }
+body[data-role=regia] .talk {
+  display: grid; height: 100%;
+  grid-template-columns: minmax(0, 1fr) clamp(220px, 22%, 320px);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "top top" "banner banner" "chans people" "foot people";
+  column-gap: 12px;
+}
+body[data-role=regia] .talk.hidden { display: none; }
+body[data-role=regia] .talk .topbar { grid-area: top; padding: 0 0 .5rem; }
+body[data-role=regia] .talk .keys { flex: 2; text-align: center; }
+body[data-role=regia] #talkBanner { grid-area: banner; }
+body[data-role=regia] .channels {
+  grid-area: chans; overflow: auto; margin: .6rem 0; align-content: start;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .5rem;
+}
+body[data-role=regia] .chan { padding: .45rem .6rem; }
+body[data-role=regia] .chan-ctrl { margin-top: .35rem; gap: .4rem; }
+body[data-role=regia] .listen { width: 38px; height: 38px; font-size: 1.05rem; }
+body[data-role=regia] .ptt { min-height: 44px; font-size: .9rem; }
+body[data-role=regia] .people { grid-area: people; overflow: auto; margin: 0; border-left: 1px solid var(--line); padding-left: 12px; }
+body[data-role=regia] .people .peers li { padding: .4rem .5rem; flex-wrap: wrap; }
+body[data-role=regia] .talk .switch { grid-area: foot; align-self: end; padding: 0; }
+body[data-role=regia] .mic-area { grid-area: foot; padding: 0; margin: 0 0 0 auto; width: min(48%, 520px); justify-self: end; }
+body[data-role=regia] .ptt-all { min-height: 52px; }
+@media (max-width: 1000px), (max-height: 600px) {
+  body[data-role=regia] { overflow: auto; }
+  .desk { height: auto; grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "config" "intercom" "side"; }
+  body[data-role=regia] .talk { grid-template-columns: 1fr; grid-template-areas: "top" "banner" "chans" "foot" "people"; }
+  body[data-role=regia] .people { border-left: 0; padding-left: 0; }
+}
+body[data-role=regia] .talk .switch { justify-self: start; }
+body[data-role=regia] .people .peers li .who { min-width: 120px; }
