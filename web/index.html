@@ -9,33 +9,44 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-role="tecnico">
   <div class="app" id="app">
     <!-- Schermata di ingresso -->
     <section class="join" id="joinView">
       <h1>Intercom di produzione</h1>
-      <p class="muted">Scrivi il tuo nome e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
-      <input type="text" id="nameInput" placeholder="Il tuo nome (es. Marco – Cam 2)" autocomplete="nickname" maxlength="24">
+      <p class="muted">Scegli il tuo canale e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
+      <label class="field">Il tuo nome
+        <input type="text" id="nameInput" placeholder="es. Marco – Cam 2" autocomplete="nickname" maxlength="24">
+      </label>
+      <label class="field">Canale
+        <select id="channelInput"></select>
+      </label>
+      <div class="field" id="roleField">
+        <span>Ruolo</span>
+        <div class="seg">
+          <label><input type="radio" name="role" value="tecnico" checked><span>Tecnico</span></label>
+          <label><input type="radio" name="role" value="caporeparto"><span>Caporeparto</span></label>
+        </div>
+        <small class="muted" id="roleHint">Il caporeparto parla anche nel canale principale.</small>
+      </div>
       <button class="btn" id="joinBtn">Entra</button>
       <div class="banner error hidden" id="joinError"></div>
     </section>
 
     <!-- Schermata intercom -->
-    <section class="hidden" id="talkView" style="display:flex;flex-direction:column;flex:1">
+    <section class="talk hidden" id="talkView">
       <div class="topbar">
         <span class="dot" id="connDot"></span>
-        <span class="channel">Produzione</span>
+        <span class="me" id="meLabel"></span>
         <span class="status" id="connText">connessione…</span>
       </div>
       <div class="banner hidden" id="talkBanner"></div>
-      <ul class="peers" id="peerList"></ul>
-      <div class="mic-area">
-        <button class="mic" id="micBtn" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
-          <span id="micLabel">MUTO</span>
-        </button>
-        <div class="hint">Tocca per aprire/chiudere · Tieni premuto per parlare</div>
-      </div>
+      <div class="channels" id="channelList"></div>
+      <details class="people">
+        <summary>Collegati (<span id="peerCount">0</span>)</summary>
+        <ul class="peers" id="peerList"></ul>
+      </details>
+      <div class="mic-area" id="bigMicArea"></div>
     </section>
   </div>
   <script src="/static/app.js"></script>

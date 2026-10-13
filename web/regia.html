@@ -12,7 +12,7 @@
     <aside>
       <div class="card">
         <h1>Console di regia</h1>
-        <p class="muted" style="margin-top:0">Fase 1 · canale unico</p>
+        <p class="muted" style="margin-top:0">Fase 2 · canali intercom</p>
         <h2>QR per i tecnici</h2>
         <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
         <p class="url">{{APP_URL}}</p>
@@ -28,26 +28,29 @@
     <main class="card">
       <div class="app" id="app">
         <section class="join" id="joinView" style="margin:0">
-          <h2 style="margin-top:0">Partecipa all'intercom da questo computer</h2>
-          <input type="text" id="nameInput" maxlength="24">
-          <button class="btn" id="joinBtn">Entra come regia</button>
+          <h2 style="margin-top:0">Pannello intercom della regia</h2>
+          <p class="muted">La regia ascolta tutti i canali e può parlare a uno, a più canali o a tutti.</p>
+          <label class="field">Nome
+            <input type="text" id="nameInput" maxlength="24">
+          </label>
+          <button class="btn" id="joinBtn">Apri il pannello</button>
           <div class="banner error hidden" id="joinError"></div>
         </section>
-        <section class="hidden" id="talkView" style="display:flex;flex-direction:column">
+        <section class="talk hidden" id="talkView">
           <div class="topbar">
             <span class="dot" id="connDot"></span>
-            <span class="channel">Produzione</span>
+            <span class="me" id="meLabel"></span>
             <span class="status" id="connText">connessione…</span>
           </div>
           <div class="banner hidden" id="talkBanner"></div>
-          <ul class="peers" id="peerList"></ul>
-          <div class="mic-area">
-            <button class="mic" id="micBtn" aria-pressed="false" style="width:180px">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
-              <span id="micLabel">MUTO</span>
-            </button>
-            <div class="hint">Clic per aprire/chiudere · tieni premuto, oppure <kbd>Spazio</kbd>, per parlare</div>
-          </div>
+          <div class="channels" id="channelList"></div>
+          <p class="hint">Clic = apri/chiudi · tieni premuto = parla finché tieni.
+            Tastiera: <kbd>1</kbd>…<kbd>9</kbd> per i canali, <kbd>Spazio</kbd> per tutti.</p>
+          <details class="people" open>
+            <summary>Collegati (<span id="peerCount">0</span>)</summary>
+            <ul class="peers" id="peerList"></ul>
+          </details>
+          <div class="mic-area" id="bigMicArea"></div>
         </section>
       </div>
     </main>

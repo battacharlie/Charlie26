@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func freeUDPPort(t *testing.T) int {
 
 func startServer(t *testing.T) (*httptest.Server, *sfu.Room) {
 	t.Helper()
-	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t)})
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t), Channels: sfu.DefaultChannels()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,18 +49,22 @@ func startServer(t *testing.T) (*httptest.Server, *sfu.Room) {
 }
 
 // fakePhone simula un telefono: si collega via WebSocket, invia audio Opus
-// e conta i pacchetti audio che riceve dagli altri.
+// in continuazione e conta i pacchetti ricevuti da ciascun partecipante.
 type fakePhone struct {
-	t        *testing.T
-	ws       *websocket.Conn
-	pc       *webrtc.PeerConnection
-	wmu      sync.Mutex
-	received chan string // id del partecipante da cui arriva audio
-	audio    *webrtc.TrackLocalStaticSample
-	id       chan string
+	t     *testing.T
+	name  string
+	ws    *websocket.Conn
+	pc    *webrtc.PeerConnection
+	wmu   sync.Mutex
+	audio *webrtc.TrackLocalStaticSample
+	id    string
+
+	mu      sync.Mutex
+	packets map[string]*atomic.Int64 // id mittente -> pacchetti ricevuti
+	welcome chan string
 }
 
-func newFakePhone(t *testing.T, ts *httptest.Server, name string) *fakePhone {
+func newFakePhone(t *testing.T, ts *httptest.Server, name, role, channel string) *fakePhone {
 	t.Helper()
 	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	ws, _, err := dialer.Dial("wss"+strings.TrimPrefix(ts.URL, "https")+"/ws", nil)
@@ -81,39 +86,54 @@ func newFakePhone(t *testing.T, ts *httptest.Server, name string) *fakePhone {
 	if _, err := pc.AddTrack(audio); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakePhone{t: t, ws: ws, pc: pc, audio: audio, received: make(chan string, 16), id: make(chan string, 1)}
+	f := &fakePhone{t: t, name: name, ws: ws, pc: pc, audio: audio, packets: map[string]*atomic.Int64{}, welcome: make(chan string, 1)}
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c != nil {
-			init := c.ToJSON()
-			f.write(map[string]any{"type": "candidate", "candidate": init})
+			f.write(map[string]any{"type": "candidate", "candidate": c.ToJSON()})
 		}
 	})
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		ctr := f.counter(tr.StreamID())
 		buf := make([]byte, 1500)
-		for i := 0; i < 5; i++ { // almeno 5 pacchetti veri, non solo la negoziazione
+		for {
 			if _, _, err := tr.Read(buf); err != nil {
 				return
 			}
+			ctr.Add(1)
 		}
-		f.received <- tr.StreamID()
-		_, _ = io.Copy(io.Discard, readerFunc(func(b []byte) (int, error) { n, _, err := tr.Read(b); return n, err }))
 	})
 	t.Cleanup(func() { ws.Close(); pc.Close() })
 
 	go f.loop()
-	f.write(map[string]any{"type": "join", "name": name})
+	f.write(map[string]any{"type": "join", "name": name, "role": role, "channel": channel})
+	select {
+	case f.id = <-f.welcome:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s: nessun benvenuto dal server", name)
+	}
 	go f.speak()
 	return f
 }
 
-type readerFunc func([]byte) (int, error)
-
-func (r readerFunc) Read(b []byte) (int, error) { return r(b) }
+func (f *fakePhone) counter(from string) *atomic.Int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.packets[from]
+	if !ok {
+		c = &atomic.Int64{}
+		f.packets[from] = c
+	}
+	return c
+}
 
 func (f *fakePhone) write(v any) {
 	f.wmu.Lock()
 	defer f.wmu.Unlock()
 	_ = f.ws.WriteJSON(v)
+}
+
+func (f *fakePhone) talk(channels ...string) {
+	f.write(map[string]any{"type": "talk", "channels": channels})
 }
 
 func (f *fakePhone) loop() {
@@ -124,7 +144,9 @@ func (f *fakePhone) loop() {
 		}
 		switch m.Type {
 		case "welcome":
-			f.id <- m.ID
+			f.welcome <- m.ID
+		case "error":
+			f.t.Logf("%s: errore dal server: %s", f.name, m.Error)
 		case "offer":
 			if f.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 				return
@@ -162,59 +184,127 @@ func (f *fakePhone) speak() {
 	}
 }
 
-func waitID(t *testing.T, f *fakePhone) string {
-	t.Helper()
-	select {
-	case id := <-f.id:
-		return id
-	case <-time.After(5 * time.Second):
-		t.Fatal("nessun benvenuto dal server")
-		return ""
+// hearing misura, in una finestra di tempo, da chi ogni telefono riceve audio.
+// Restituisce per ogni telefono l'insieme dei nomi che ha sentito.
+func hearing(phones []*fakePhone, window time.Duration) map[string]map[string]bool {
+	byID := map[string]string{}
+	for _, p := range phones {
+		byID[p.id] = p.name
 	}
-}
-
-func waitAudioFrom(t *testing.T, f *fakePhone, from ...string) {
-	t.Helper()
-	missing := map[string]bool{}
-	for _, id := range from {
-		missing[id] = true
+	before := map[*fakePhone]map[string]int64{}
+	for _, p := range phones {
+		before[p] = snapshot(p)
 	}
-	deadline := time.After(15 * time.Second)
-	for len(missing) > 0 {
-		select {
-		case got := <-f.received:
-			delete(missing, got)
-		case <-deadline:
-			t.Fatalf("nessun audio ricevuto da %v", missing)
+	time.Sleep(window)
+	out := map[string]map[string]bool{}
+	for _, p := range phones {
+		out[p.name] = map[string]bool{}
+		after := snapshot(p)
+		for from, n := range after {
+			// a 50 pacchetti/s, in 600 ms ne arrivano ~30: 10 è una soglia sicura
+			if n-before[p][from] >= 10 {
+				out[p.name][byID[from]] = true
+			}
 		}
 	}
+	return out
 }
 
-// Due telefoni: ognuno deve sentire l'altro, passando dal server di regia.
-func TestTwoPhonesHearEachOther(t *testing.T) {
+func snapshot(p *fakePhone) map[string]int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m := map[string]int64{}
+	for k, v := range p.packets {
+		m[k] = v.Load()
+	}
+	return m
+}
+
+// expectHearing verifica, con qualche tentativo per dare tempo alle
+// negoziazioni, che ognuno senta esattamente chi deve sentire.
+func expectHearing(t *testing.T, phones []*fakePhone, want map[string][]string) {
+	t.Helper()
+	var got map[string]map[string]bool
+	for attempt := 0; attempt < 15; attempt++ {
+		got = hearing(phones, 600*time.Millisecond)
+		if matches(got, want) {
+			return
+		}
+	}
+	t.Fatalf("ascolto errato.\nottenuto: %v\natteso:   %v", got, want)
+}
+
+func matches(got map[string]map[string]bool, want map[string][]string) bool {
+	for name, heard := range got {
+		w := want[name]
+		if len(heard) != len(w) {
+			return false
+		}
+		for _, x := range w {
+			if !heard[x] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Scenario completo: regia, caporeparto video, cameraman, fonico.
+func TestIntercomChannels(t *testing.T) {
 	ts, room := startServer(t)
 
-	a := newFakePhone(t, ts, "Marco")
-	idA := waitID(t, a)
-	b := newFakePhone(t, ts, "Giulia")
-	idB := waitID(t, b)
+	regia := newFakePhone(t, ts, "Regia", sfu.RoleRegia, "")
+	capo := newFakePhone(t, ts, "CapoVideo", sfu.RoleCaporeparto, "video")
+	cam := newFakePhone(t, ts, "Cam1", sfu.RoleTecnico, "video")
+	fon := newFakePhone(t, ts, "Fonico", sfu.RoleTecnico, "audio")
+	all := []*fakePhone{regia, capo, cam, fon}
 
-	waitAudioFrom(t, b, idA)
-	waitAudioFrom(t, a, idB)
+	// Nessuno preme "parla": silenzio totale, anche se i microfoni mandano audio.
+	expectHearing(t, all, map[string][]string{})
 
-	if n := len(room.Peers()); n != 2 {
-		t.Fatalf("attesi 2 partecipanti, trovati %d", n)
-	}
+	// Il cameraman parla nel canale video: lo sentono capo video e regia.
+	cam.talk("video")
+	expectHearing(t, all, map[string][]string{"Regia": {"Cam1"}, "CapoVideo": {"Cam1"}})
+	cam.talk()
 
-	// Un terzo che entra dopo deve sentire entrambi.
-	c := newFakePhone(t, ts, "Luca")
-	waitID(t, c)
-	waitAudioFrom(t, c, idA, idB)
+	// Il caporeparto parla in Produzione: lo sente solo la regia, non i suoi cameraman.
+	capo.talk("produzione")
+	expectHearing(t, all, map[string][]string{"Regia": {"CapoVideo"}})
+	capo.talk()
+
+	// La regia parla solo all'audio: sente solo il fonico.
+	regia.talk("audio")
+	expectHearing(t, all, map[string][]string{"Fonico": {"Regia"}})
+
+	// La regia "parla a tutti".
+	regia.talk("produzione", "video", "audio", "luci")
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Regia"}, "Cam1": {"Regia"}, "Fonico": {"Regia"}})
+	regia.talk()
+
+	// Un tecnico non può parlare su un canale di cui non è membro.
+	fon.talk("video", "produzione")
+	expectHearing(t, all, map[string][]string{})
+	fon.talk()
+
+	// La regia spegne l'ascolto del canale video: il cameraman lo sente solo il capo.
+	regia.write(map[string]any{"type": "listen", "channel": "video", "on": false})
+	cam.talk("video")
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Cam1"}})
+	regia.write(map[string]any{"type": "listen", "channel": "video", "on": true})
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Cam1"}, "Regia": {"Cam1"}})
+	cam.talk()
+
+	// Chi entra dopo è subito inserito nella logica.
+	cam2 := newFakePhone(t, ts, "Cam2", sfu.RoleTecnico, "video")
+	all = append(all, cam2)
+	regia.talk("video")
+	expectHearing(t, all, map[string][]string{"CapoVideo": {"Regia"}, "Cam1": {"Regia"}, "Cam2": {"Regia"}})
+	regia.talk()
 
 	// Chi esce sparisce dalla lista.
-	c.ws.Close()
+	cam2.ws.Close()
 	deadline := time.Now().Add(5 * time.Second)
-	for len(room.Peers()) != 2 {
+	for len(room.Peers()) != 4 {
 		if time.Now().After(deadline) {
 			t.Fatalf("il partecipante uscito è ancora in lista: %v", room.Peers())
 		}
@@ -231,6 +321,7 @@ func TestPagesAndCA(t *testing.T) {
 		"/aiuto":         "https://127.0.0.1:8443/",
 		"/ca.crt":        "BEGIN CERTIFICATE",
 		"/static/app.js": "getUserMedia",
+		"/api/info":      `"produzione"`,
 	} {
 		resp, err := client.Get(ts.URL + path)
 		if err != nil {

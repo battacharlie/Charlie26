@@ -40,6 +40,8 @@ func main() {
 		certFile  = flag.String("cert", "", "certificato del tuo dominio (opzione B), file .crt/.pem con la catena completa")
 		keyFile   = flag.String("key", "", "chiave privata del certificato di dominio")
 		domain    = flag.String("dominio", "", "dominio per l'opzione B, es. intercom.esempio.it: i QR useranno 192-168-1-10.intercom.esempio.it")
+		mainName  = flag.String("principale", "Produzione", "nome del canale principale")
+		depts     = flag.String("canali", "Video,Audio,Luci", "reparti separati da virgola")
 		noBrowser = flag.Bool("no-browser", false, "non aprire automaticamente la console nel browser")
 	)
 	flag.Parse()
@@ -114,7 +116,8 @@ func main() {
 		fmt.Println("  HTTPS: CA locale (cartella " + certDir + ")")
 	}
 
-	room, err := sfu.NewRoom(sfu.Config{UDPPort: *udpPort})
+	channels := sfu.ChannelsFromNames(*mainName, strings.Split(*depts, ","))
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: *udpPort, Channels: channels})
 	if err != nil {
 		fatal("%v\n  Un altro programma (o un'altra copia di questo) usa già la porta. Prova con -porta-udp 8500.", err)
 	}
@@ -163,6 +166,11 @@ func main() {
 		fmt.Println("  Aiuto certificato: " + srv.HelpURL())
 	}
 	fmt.Printf("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
+	names := make([]string, len(channels))
+	for i, c := range channels {
+		names[i] = c.Name
+	}
+	fmt.Println("  Canali: " + strings.Join(names, ", "))
 	fmt.Println()
 	fmt.Println("  Se Windows chiede di consentire l'accesso alla rete, scegli")
 	fmt.Println("  \"Reti private\" e premi Consenti. Chiudi questa finestra per spegnere.")

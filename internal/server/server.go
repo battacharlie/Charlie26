@@ -159,6 +159,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"host":     s.cfg.Host,
 		"ips":      s.cfg.IPs,
 		"peers":    s.cfg.Room.Peers(),
+		"channels": s.cfg.Room.Channels(),
 	})
 }
 
@@ -166,6 +167,9 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 type clientMsg struct {
 	Type      string                   `json:"type"`
 	Name      string                   `json:"name"`
+	Role      string                   `json:"role"`
+	Channel   string                   `json:"channel"`
+	Channels  []string                 `json:"channels"`
 	SDP       string                   `json:"sdp"`
 	Candidate *webrtc.ICECandidateInit `json:"candidate"`
 	On        bool                     `json:"on"`
@@ -242,13 +246,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil {
 				continue
 			}
-			name := cleanName(m.Name)
-			peer, err = s.cfg.Room.Join(name, send)
+			// Fino alla Fase 3 (login) la regia può entrare solo dalla macchina di regia.
+			if m.Role == sfu.RoleRegia && !isLoopback(r.RemoteAddr) {
+				send(sfu.Message{Type: "error", Error: "il ruolo regia è disponibile solo sul computer di regia"})
+				return
+			}
+			peer, err = s.cfg.Room.Join(sfu.JoinOptions{Name: cleanName(m.Name), Role: m.Role, Channel: m.Channel}, send)
 			if err != nil {
 				send(sfu.Message{Type: "error", Error: "impossibile entrare: " + err.Error()})
 				return
 			}
-			log.Printf("[%s %s] entrato da %s", peer.ID, peer.Name, r.RemoteAddr)
+			log.Printf("[%s %s] entrato come %s da %s", peer.ID, peer.Name, peer.Role, r.RemoteAddr)
 		case "answer":
 			if peer != nil {
 				if err := peer.HandleAnswer(m.SDP); err != nil {
@@ -259,9 +267,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if peer != nil && m.Candidate != nil {
 				_ = peer.AddCandidate(*m.Candidate)
 			}
-		case "mic":
+		case "talk":
 			if peer != nil {
-				peer.SetMic(m.On)
+				peer.SetTalk(m.Channels)
+			}
+		case "listen":
+			if peer != nil {
+				peer.SetListen(m.Channel, m.On)
 			}
 		case "ping":
 			// tiene vivo il collegamento anche dove i ping WebSocket non arrivano
@@ -279,6 +291,11 @@ func cleanName(n string) string {
 		r = r[:24]
 	}
 	return string(r)
+}
+
+func isLoopback(addr string) bool {
+	ip := net.ParseIP(hostOnly(addr))
+	return ip != nil && ip.IsLoopback()
 }
 
 func hostOnly(h string) string {

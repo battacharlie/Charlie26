@@ -28,7 +28,7 @@ button, input {
   font: inherit;
   color: inherit;
 }
-input[type=text] {
+input[type=text], select {
   width: 100%;
   padding: .9rem 1rem;
   border-radius: var(--radius);
@@ -50,6 +50,17 @@ input[type=text] {
 }
 .btn.secondary { background: var(--panel); border: 1px solid var(--line); }
 
+.field { display: block; margin-bottom: .9rem; color: var(--muted); font-size: .9rem; }
+.field input, .field select { margin-top: .3rem; color: var(--text); }
+.seg { display: flex; gap: .5rem; margin: .3rem 0; }
+.seg label { flex: 1; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span {
+  display: block; text-align: center; padding: .8rem; border-radius: var(--radius);
+  background: var(--panel); border: 1px solid var(--line); color: var(--text); cursor: pointer;
+}
+.seg input:checked + span { border-color: #2f6fed; background: #16264a; }
+
 /* ---------- App tecnici ---------- */
 .app {
   max-width: 520px;
@@ -68,13 +79,48 @@ input[type=text] {
   padding: .4rem 0 .8rem;
   border-bottom: 1px solid var(--line);
 }
-.topbar .channel { font-weight: 700; font-size: 1.15rem; flex: 1; }
+.topbar .me { font-weight: 700; font-size: 1.05rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.talk { display: flex; flex-direction: column; flex: 1; }
+
+/* Righe canale */
+.channels { display: flex; flex-direction: column; gap: .6rem; margin: .8rem 0; }
+.chan {
+  background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius);
+  padding: .7rem .8rem; transition: border-color .12s, background .12s;
+}
+.chan.busy { border-color: #2a5a43; }
+.chan.voice { border-color: var(--talk); background: #13261d; }
+.chan.mine { border-color: var(--live); }
+.chan.off { opacity: .55; }
+.chan-head { display: flex; align-items: baseline; gap: .6rem; min-height: 1.6rem; }
+.chan-name { font-weight: 700; font-size: 1.1rem; }
+.chan-who { flex: 1; text-align: right; color: var(--talk); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-ctrl { display: flex; align-items: center; gap: .6rem; margin-top: .5rem; }
+.chan-ctrl:empty { display: none; }
+.listen {
+  width: 48px; height: 48px; flex: none; border-radius: 12px; border: 1px solid var(--line);
+  background: #22262d; font-size: 1.3rem; cursor: pointer;
+}
+.vol { flex: 1; min-width: 60px; accent-color: #7fb4ff; }
+.ptt {
+  --level: 0;
+  flex: 2; min-height: 64px; border: 0; border-radius: 12px; background: #2a2e35; color: #cfd3da;
+  font-weight: 800; letter-spacing: .05em; font-size: 1rem; cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+}
+.ptt.on { background: var(--live); color: #fff; box-shadow: 0 0 0 calc(3px + var(--level) * 14px) var(--live-glow); }
+.ptt kbd { font-size: .75rem; font-weight: 600; opacity: .8; }
+.ptt-all { width: 100%; min-height: 72px; font-size: 1.1rem; }
+.people { margin: .4rem 0; }
+.people summary { cursor: pointer; color: var(--muted); padding: .3rem 0; }
+.peers li .who { flex: 1; display: flex; flex-direction: column; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); }
 .dot.ok { background: var(--talk); }
 .dot.bad { background: var(--live); }
 .status { font-size: .85rem; color: var(--muted); }
 
-.peers { list-style: none; margin: .8rem 0; padding: 0; flex: 1; overflow-y: auto; }
+.peers { list-style: none; margin: .4rem 0; padding: 0; }
 .peers li {
   display: flex;
   align-items: center;
@@ -92,7 +138,8 @@ input[type=text] {
 .mic-badge { font-size: .75rem; padding: .1rem .45rem; border-radius: 6px; background: #2a2e35; color: var(--muted); }
 .mic-badge.on { background: var(--live); color: #fff; }
 
-.mic-area { display: flex; flex-direction: column; align-items: center; padding: .5rem 0 .2rem; }
+.mic-area { display: flex; flex-direction: column; align-items: center; padding: .5rem 0 .2rem; margin-top: auto; }
+.mic-area:empty { display: none; }
 .mic {
   --level: 0;
   width: min(62vw, 240px);
@@ -142,7 +189,8 @@ input[type=text] {
 .qr { width: 100%; max-width: 300px; background: #fff; border-radius: 10px; padding: 8px; display: block; }
 .url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9rem; word-break: break-all; }
 .console .app { max-width: none; padding: 0; min-height: 0; }
-.console .peers { max-height: 50vh; }
+.console .peers { max-height: 40vh; overflow-y: auto; }
+.console .channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 kbd { background: #2a2e35; border-radius: 4px; padding: 0 .35rem; font-family: inherit; }
 @media (max-width: 760px) {
   .console { grid-template-columns: 1fr; padding: 16px; }
@@ -153,3 +201,8 @@ kbd { background: #2a2e35; border-radius: 4px; padding: 0 .35rem; font-family: i
 .doc ol { padding-left: 1.3rem; }
 .doc li { margin-bottom: .5rem; }
 .doc .card { margin: 1rem 0; }
+
+/* Telefono: comandi in basso, a portata di pollice. */
+body:not([data-role=regia]) .talk .people { order: 2; }
+body:not([data-role=regia]) .talk .channels { order: 3; margin-top: auto; }
+body:not([data-role=regia]) .talk .mic-area { order: 4; margin-top: 0; }
