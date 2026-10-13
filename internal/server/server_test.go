@@ -67,6 +67,7 @@ type fakePhone struct {
 	mu      sync.Mutex
 	packets map[string]*atomic.Int64 // id mittente -> pacchetti ricevuti
 	welcome chan string
+	token   string // gettone da caporeparto ricevuto all'ingresso (libero accesso)
 	msgs    chan sfu.Message // altri messaggi dal server (mute, kicked, me…)
 }
 
@@ -168,6 +169,7 @@ func (f *fakePhone) loop() {
 		}
 		switch m.Type {
 		case "welcome":
+			f.token = m.Token
 			f.welcome <- m.ID
 		case "error":
 			f.t.Logf("%s: errore dal server: %s", f.name, m.Error)
@@ -445,6 +447,21 @@ func TestFreeAccessSubchannel(t *testing.T) {
 	luca.talk("produzione")
 	expectHearing(t, all, map[string][]string{})
 	luca.talk()
+
+	// Il vecchio gettone di Luca non vale più: senza password non entra in Palco.
+	if luca.token == "" {
+		t.Fatal("Luca avrebbe dovuto ricevere un gettone creando Palco")
+	}
+	ws, _, err := (&websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}).Dial("wss"+strings.TrimPrefix(ts.URL, "https")+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ws.WriteJSON(map[string]any{"type": "join", "name": "Luca-bis", "channel": "palco", "ownerTokens": []string{luca.token}})
+	var reply sfu.Message
+	if err := ws.ReadJSON(&reply); err != nil || reply.Type != "error" {
+		t.Fatalf("con il gettone revocato non deve entrare senza password: %+v %v", reply, err)
+	}
+	ws.Close()
 
 	// La regia nomina caporeparto Ugo: riceve il gettone e i poteri.
 	regia.write(map[string]any{"type": "promote", "peer": ugo.id, "channel": "palco"})
