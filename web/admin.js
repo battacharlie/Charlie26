@@ -92,6 +92,28 @@
       modes.append(el('label', { class: ev.mode === mode ? 'sel' : '' }, radio, el('b', {}, title), el('div', { class: 'small muted' }, desc)));
     }
     body.append(modes);
+
+    // Import / export della configurazione
+    body.append(el('h2', {}, 'Salva o carica la configurazione'));
+    const file = el('input', { type: 'file', accept: '.json,application/json', class: 'hidden' });
+    file.addEventListener('change', async () => {
+      const f = file.files[0];
+      file.value = '';
+      if (!f) return;
+      if (!confirm('Caricare "' + f.name + '"? Canali, utenti e modalità attuali verranno sostituiti; chi è collegato viene aggiornato o scollegato.')) return;
+      const r = await fetch('/api/regia/importa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: await f.text() });
+      const out = await r.json();
+      if (!r.ok) { notify(out.error || 'Importazione non riuscita', true); return; }
+      ev = out;
+      render();
+      notify('Configurazione caricata da ' + f.name);
+    });
+    body.append(el('div', { class: 'row' },
+      el('a', { class: 'mini primary', href: '/api/regia/esporta', download: '' }, '⬇ Esporta configurazione'),
+      el('button', { class: 'mini', onclick: () => file.click() }, '⬆ Importa configurazione…'),
+      file));
+    body.append(el('p', { class: 'small muted' }, 'Il file contiene canali, utenti e impostazioni (le password solo come impronta non leggibile). ' +
+      'Usalo per preparare un evento in anticipo o riutilizzarlo come modello.'));
   }
 
   function renderVideo(body) {

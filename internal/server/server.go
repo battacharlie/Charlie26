@@ -79,6 +79,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/regia/evento", s.onlyRegia(s.handleEventGet))
 	mux.HandleFunc("POST /api/regia/evento", s.onlyRegia(s.handleEventChange))
+	mux.HandleFunc("GET /api/regia/esporta", s.onlyRegia(s.handleExport))
+	mux.HandleFunc("POST /api/regia/importa", s.onlyRegia(s.handleImport))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
 	mux.HandleFunc("GET /static/rnnoise-worklet.js", s.handleRNNoise)

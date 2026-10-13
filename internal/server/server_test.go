@@ -67,7 +67,7 @@ type fakePhone struct {
 	mu      sync.Mutex
 	packets map[string]*atomic.Int64 // id mittente -> pacchetti ricevuti
 	welcome chan string
-	token   string // gettone da caporeparto ricevuto all'ingresso (libero accesso)
+	token   string           // gettone da caporeparto ricevuto all'ingresso (libero accesso)
 	msgs    chan sfu.Message // altri messaggi dal server (mute, kicked, me…)
 }
 
@@ -562,6 +562,47 @@ func TestRegiaAPI(t *testing.T) {
 		t.Fatal("cambio modalità non riuscito")
 	}
 	login(t, ts, "marco", "abcd")
+
+	// Esporta, cambia tutto, reimporta: torna com'era e la password vale ancora.
+	resp, err := ts.Client().Get(ts.URL + "/api/regia/esporta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "attachment") || !strings.Contains(string(exported), evento.FileType) {
+		t.Fatalf("esportazione: %s", exported)
+	}
+	if code, _ := post(`{"op":"removeUser","user":{"username":"marco"}}`); code != 200 {
+		t.Fatal("eliminazione utente")
+	}
+	if code, _ := post(`{"op":"mode","mode":"libero"}`); code != 200 {
+		t.Fatal("cambio modalità")
+	}
+	importa := func(body string) int {
+		resp, err := ts.Client().Post(ts.URL+"/api/regia/importa", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := importa(string(exported)); code != 200 {
+		t.Fatalf("importazione: %d", code)
+	}
+	if room.Mode() != evento.ModeCredenziali || room.Event().User("marco") == nil {
+		t.Fatal("dopo l'importazione modalità e utenti devono tornare quelli esportati")
+	}
+	login(t, ts, "marco", "abcd")
+	// File non validi: rifiutati senza toccare l'evento.
+	for _, bad := range []string{`ciao`, `{"tipo":"altro"}`, `{"tipo":"` + evento.FileType + `","evento":{"mode":"libero","channels":[]}}`} {
+		if code := importa(bad); code != 400 {
+			t.Fatalf("file non valido %q accettato (%d)", bad, code)
+		}
+	}
+	if room.Event().User("marco") == nil {
+		t.Fatal("un'importazione fallita non deve cambiare l'evento")
+	}
 }
 
 func TestPagesAndCA(t *testing.T) {

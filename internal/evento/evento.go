@@ -371,3 +371,41 @@ func without(xs []string, x string) []string {
 	}
 	return out
 }
+
+// FileType identifica i file di configurazione esportati da questo programma.
+const FileType = "intercom-regia/evento"
+
+// ExportFile è il contenuto di un file di configurazione esportato.
+type ExportFile struct {
+	Tipo      string `json:"tipo"`
+	Versione  int    `json:"versione"`
+	Esportato string `json:"esportato"`
+	Evento    *Event `json:"evento"`
+}
+
+// ParseExport legge un file esportato (accetta anche un evento.json "nudo").
+// I gettoni da caporeparto non vengono importati: valgono solo per l'evento
+// in cui sono nati.
+func ParseExport(b []byte) (*Event, error) {
+	var f ExportFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return nil, errors.New("il file non è una configurazione valida (JSON non leggibile)")
+	}
+	e := f.Evento
+	if f.Tipo == "" && e == nil {
+		var bare Event
+		if err := json.Unmarshal(b, &bare); err != nil || len(bare.Channels) == 0 {
+			return nil, errors.New("il file non sembra una configurazione dell'intercom")
+		}
+		e = &bare
+	} else if f.Tipo != FileType || e == nil {
+		return nil, errors.New("il file non sembra una configurazione dell'intercom")
+	}
+	for i := range e.Channels {
+		e.Channels[i].OwnerHashes = nil
+	}
+	if err := e.Validate(); err != nil {
+		return nil, fmt.Errorf("configurazione non valida: %w", err)
+	}
+	return e, nil
+}

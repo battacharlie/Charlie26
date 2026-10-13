@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,6 +61,42 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"session": token})
+}
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	e := s.cfg.Room.ExportEvent()
+	b, err := json.MarshalIndent(evento.ExportFile{
+		Tipo:      evento.FileType,
+		Versione:  1,
+		Esportato: time.Now().Format(time.RFC3339),
+		Evento:    e,
+	}, "", "  ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	name := evento.Slug(e.Name) + "-" + time.Now().Format("2006-01-02") + ".json"
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	_, _ = w.Write(b)
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file troppo grande"})
+		return
+	}
+	imported, err := evento.ParseExport(b)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.cfg.Room.UpdateEvent(func(e *evento.Event) error { *e = *imported; return nil }); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cfg.Room.Event())
 }
 
 func (s *Server) handleEventGet(w http.ResponseWriter, r *http.Request) {

@@ -411,6 +411,19 @@ func (r *Room) Event() *evento.Event {
 	return e
 }
 
+// ExportEvent restituisce una copia completa dell'evento da salvare su file:
+// include le impronte delle password (così gli utenti restano validi
+// reimportandolo) ma non i gettoni da caporeparto.
+func (r *Room) ExportEvent() *evento.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e := r.event.Clone()
+	for i := range e.Channels {
+		e.Channels[i].OwnerHashes = nil
+	}
+	return e
+}
+
 // UpdateEvent applica una modifica all'evento. Se la modifica non è valida
 // l'evento resta com'era. I partecipanti collegati vengono aggiornati subito.
 func (r *Room) UpdateEvent(change func(e *evento.Event) error) error {

@@ -309,3 +309,4 @@ body[data-role=regia] .ptt-all { min-height: 52px; }
 }
 body[data-role=regia] .talk .switch { justify-self: start; }
 body[data-role=regia] .people .peers li .who { min-width: 120px; }
+a.mini { text-decoration: none; display: inline-block; }
