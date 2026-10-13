@@ -1,24 +1,32 @@
 // Package sfu è il "centralino" WebRTC: riceve l'audio (e in futuro il video)
 // di ogni partecipante e lo inoltra agli altri, senza mescolarlo.
 //
-// Fase 1: un solo canale, tutti sentono tutti. La logica dei canali multipli
-// (Fase 2) si innesta in Room.wants, che decide chi riceve il flusso di chi.
+// Logica intercom (vedi routing.go, accessi e permessi in access.go):
+//   - ogni partecipante è membro di uno o più canali;
+//   - preme "parla" su uno o più dei suoi canali;
+//   - sente chi sta parlando su un canale che lui ascolta.
+//
+// Per non perdere le prime sillabe, i flussi tra persone che hanno almeno un
+// canale in comune sono negoziati in anticipo; premere "parla" apre solo un
+// "rubinetto" interno al server, istantaneo.
 package sfu
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
+
+	"github.com/battacharlie/charlie26/internal/evento"
 )
 
 // Config della parte WebRTC.
@@ -26,61 +34,128 @@ type Config struct {
 	// UDPPort è l'unica porta UDP usata da tutti i flussi audio/video.
 	// Una porta sola semplifica molto il firewall di Windows.
 	UDPPort int
+	// Event è la configurazione iniziale (canali, utenti, modalità).
+	Event *evento.Event
+	// Save viene chiamata a ogni modifica dell'evento (può essere nil).
+	Save func(*evento.Event) error
 }
 
 // Message è un messaggio verso il browser (serializzato in JSON dal server).
 type Message struct {
-	Type  string     `json:"type"`
-	ID    string     `json:"id,omitempty"`
-	SDP   string     `json:"sdp,omitempty"`
-	Peers []PeerInfo `json:"peers,omitempty"`
-	Error string     `json:"error,omitempty"`
+	Type     string        `json:"type"`
+	ID       string        `json:"id,omitempty"`
+	SDP      string        `json:"sdp,omitempty"`
+	Peers    []PeerInfo    `json:"peers,omitempty"`
+	Channels []ChannelInfo `json:"channels,omitempty"`
+	Mode     string        `json:"mode,omitempty"`
+	Me       *PeerInfo     `json:"me,omitempty"`
+	Channel  string        `json:"channel,omitempty"`
+	Token    string        `json:"token,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	Videos   []VideoInfo   `json:"videos,omitempty"`
+	Video    []VideoSlot   `json:"video,omitempty"`  // insieme all'offerta: linee video da usare per inviare
+	Stream   string        `json:"stream,omitempty"` // id di un flusso video
+	Look     *evento.Look  `json:"look,omitempty"`
+	Ref      string        `json:"ref,omitempty"`
 }
 
 // PeerInfo descrive un partecipante nella lista mostrata ai client.
 type PeerInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Mic  bool   `json:"mic"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Role     string   `json:"role"`
+	Channels []string `json:"channels"`         // canali di cui è membro
+	Admin    []string `json:"admin,omitempty"`  // canali di cui è responsabile
+	Talk     []string `json:"talk"`             // canali su cui sta parlando ora
+	Forced   []string `json:"forced,omitempty"` // canali aperti dal suo responsabile
+	Muted    []string `json:"muted,omitempty"`  // canali che ha smesso di ascoltare
+	Avatar   string   `json:"avatar,omitempty"` // "m1"…"m4" oppure "foto"
+	AvatarV  int      `json:"avatarV,omitempty"`
 }
 
-// Room è un gruppo di partecipanti che si scambiano flussi.
+// Room è l'insieme di canali e partecipanti.
 type Room struct {
 	api *webrtc.API
 	mux ice.UDPMux
 
-	mu     sync.Mutex
-	peers  map[string]*Peer
-	tracks map[string]*forward // flussi in arrivo, per id
-	nextID int
+	mu        sync.Mutex
+	event     *evento.Event
+	save      func(*evento.Event) error
+	sessions  map[string]string // gettone di sessione -> nome utente (modalità credenziali)
+	peers     map[string]*Peer
+	tracks    map[string]*forward // flussi audio in arrivo, per id
+	videos    map[string]*VideoStream
+	whip      map[string]*webrtc.PeerConnection // ingressi WHIP attivi
+	nextID    int
+	nextVideo int
 }
 
+// forward è un flusso in arrivo da un partecipante, con una copia
+// (dest) per ogni possibile ascoltatore.
 type forward struct {
+	id    string
 	owner *Peer
-	local *webrtc.TrackLocalStaticRTP
 	kind  webrtc.RTPCodecType
+	codec webrtc.RTPCodecCapability
 	pli   func() // chiede un fotogramma chiave alla sorgente (solo video)
+
+	dests atomic.Pointer[[]*dest] // letto a ogni pacchetto senza lock
+}
+
+// dest è la copia di un flusso verso un singolo ascoltatore.
+type dest struct {
+	to     *Peer
+	local  *webrtc.TrackLocalStaticRTP
+	sender *webrtc.RTPSender
+	open   atomic.Bool // rubinetto: true se in questo momento deve sentire
+	seq    uint16      // numerazione continua dei pacchetti inoltrati (solo goroutine di lettura)
 }
 
 // Peer è un partecipante collegato.
 type Peer struct {
-	ID   string
+	ID    string
+	Label string // etichetta fissa per il registro (leggibile senza lock)
+
+	// Name e Role possono cambiare quando la regia modifica l'evento:
+	// vanno letti con room.mu bloccato.
 	Name string
+	Role string
 
-	room    *Room
-	pc      *webrtc.PeerConnection
-	send    func(Message)
-	mic     bool
-	senders map[string]*webrtc.RTPSender // id flusso -> sender verso questo peer
+	room   *Room
+	pc     *webrtc.PeerConnection
+	send   func(Message)
+	ident  identity        // chi è, da cui si ricavano canali e permessi
+	member map[string]bool // canali di cui è membro
+	admin  map[string]bool // canali di cui è responsabile
+	talk   map[string]bool // canali su cui ha chiesto di parlare
+	forced map[string]bool // canali aperti dal suo responsabile
+	muted  map[string]bool // canali che non vuole ascoltare
 
-	needsOffer bool // serve una nuova negoziazione appena finisce quella in corso
+	avatar     string // "m1"…"m4", "foto" o vuoto
+	avatarImg  []byte
+	avatarMime string
+	avatarVer  int
+
+	vpairs    []*vpair          // linee con cui questo browser invia video
+	videoQ    string            // qualità video predefinita: "h", "l" o "off"
+	videoWant map[string]string // qualità scelta per singolo video
+
+	senders    map[string]*dest // id flusso -> copia verso questo peer
+	needsOffer bool             // serve una nuova negoziazione appena finisce quella in corso
 	closed     bool
 }
 
 // NewRoom prepara il motore WebRTC.
 func NewRoom(cfg Config) (*Room, error) {
-	me := &webrtc.MediaEngine{}
-	if err := me.RegisterDefaultCodecs(); err != nil {
+	if cfg.Event == nil {
+		cfg.Event = evento.New("Produzione", nil)
+	}
+	if err := cfg.Event.Validate(); err != nil {
+		return nil, err
+	}
+
+	me, err := mediaEngine()
+	if err != nil {
 		return nil, err
 	}
 	// Livello audio dentro ogni pacchetto: permette ai browser di mostrare
@@ -107,7 +182,41 @@ func NewRoom(cfg Config) (*Room, error) {
 	se.SetIncludeLoopbackCandidate(true)
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithInterceptorRegistry(ir), webrtc.WithSettingEngine(se))
-	return &Room{api: api, mux: mux, peers: map[string]*Peer{}, tracks: map[string]*forward{}}, nil
+	return &Room{
+		api:      api,
+		mux:      mux,
+		event:    cfg.Event.Clone(),
+		save:     cfg.Save,
+		sessions: map[string]string{},
+		peers:    map[string]*Peer{},
+		tracks:   map[string]*forward{},
+		videos:   map[string]*VideoStream{},
+		whip:     map[string]*webrtc.PeerConnection{},
+	}, nil
+}
+
+// mediaEngine: Opus per l'audio; per il video H.264 (lo decodificano in
+// hardware tutti i telefoni e lo manda OBS) e VP8 come riserva.
+func mediaEngine() (*webrtc.MediaEngine, error) {
+	me := &webrtc.MediaEngine{}
+	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"},
+		PayloadType:        111,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, err
+	}
+	fb := []webrtc.RTCPFeedback{{Type: "goog-remb"}, {Type: "ccm", Parameter: "fir"}, {Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "transport-cc"}}
+	for _, c := range []webrtc.RTPCodecParameters{
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", RTCPFeedback: fb}, PayloadType: 102},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: fb}, PayloadType: 104},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f", RTCPFeedback: fb}, PayloadType: 106},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: fb}, PayloadType: 96},
+	} {
+		if err := me.RegisterCodec(c, webrtc.RTPCodecTypeVideo); err != nil {
+			return nil, err
+		}
+	}
+	return me, nil
 }
 
 // Close libera la porta UDP.
@@ -121,13 +230,34 @@ func (r *Room) Close() error {
 	for _, p := range peers {
 		p.Close()
 	}
+	r.mu.Lock()
+	ids := make([]string, 0, len(r.whip))
+	for id := range r.whip {
+		ids = append(ids, id)
+	}
+	r.mu.Unlock()
+	for _, id := range ids {
+		r.StopWHIP(id)
+	}
 	return r.mux.Close()
 }
 
 // Join aggiunge un partecipante e avvia la prima negoziazione.
 // send viene chiamata per ogni messaggio da inoltrare al browser;
 // non deve bloccare a lungo.
-func (r *Room) Join(name string, send func(Message)) (*Peer, error) {
+func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
+	r.mu.Lock()
+	ident, newOwner, err := r.admitLocked(req)
+	if err != nil {
+		r.mu.Unlock()
+		return nil, err
+	}
+	res, err := r.resolveLocked(ident)
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
 	pc, err := r.api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return nil, err
@@ -142,59 +272,83 @@ func (r *Room) Join(name string, send func(Message)) (*Peer, error) {
 	r.mu.Lock()
 	r.nextID++
 	p := &Peer{
-		ID:      fmt.Sprintf("p%d", r.nextID),
-		Name:    name,
-		room:    r,
-		pc:      pc,
-		send:    send,
-		senders: map[string]*webrtc.RTPSender{},
+		ID:        fmt.Sprintf("p%d", r.nextID),
+		Label:     fmt.Sprintf("p%d %s (%s)", r.nextID, res.name, res.role),
+		Name:      res.name,
+		Role:      res.role,
+		room:      r,
+		pc:        pc,
+		send:      send,
+		ident:     ident,
+		member:    res.member,
+		admin:     res.admin,
+		talk:      map[string]bool{},
+		forced:    map[string]bool{},
+		muted:     map[string]bool{},
+		senders:   map[string]*dest{},
+		videoQ:    layerLow,
+		videoWant: map[string]string{},
 	}
 	r.peers[p.ID] = p
 	r.mu.Unlock()
 
-	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) { r.forwardTrack(p, remote) })
+	pc.OnTrack(func(remote *webrtc.TrackRemote, recv *webrtc.RTPReceiver) {
+		if remote.Kind() == webrtc.RTPCodecTypeVideo {
+			r.forwardVideoLayer(p, remote, recv)
+		} else {
+			r.forwardTrack(p, remote)
+		}
+	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		log.Printf("[%s %s] connessione: %s", p.ID, p.Name, s)
+		log.Printf("[%s] connessione: %s", p.Label, s)
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			go p.Close()
 		}
 	})
 
-	send(Message{Type: "welcome", ID: p.ID})
 	r.mu.Lock()
+	info := p.infoLocked()
+	look := r.event.Look
+	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info, Videos: r.videoListLocked(), Look: &look}
+	if newOwner != nil {
+		welcome.Channel, welcome.Token = newOwner.channel, newOwner.token
+	}
+	send(welcome)
 	r.syncLocked()
 	if p.pc.LocalDescription() == nil {
 		// Nessun flusso da ricevere ancora: serve comunque una prima offerta
 		// perché il browser possa iniziare a inviare il microfono.
 		p.negotiateLocked()
 	}
-	r.broadcastPeersLocked()
+	if newOwner != nil {
+		// È nato un nuovo canale: la regia (e chiunque ne abbia diritto) ne diventa
+		// subito membro.
+		r.refreshLocked()
+	} else {
+		r.broadcastPeersLocked()
+	}
 	r.mu.Unlock()
 	return p, nil
 }
 
-// wants dice se il peer "to" deve ricevere il flusso di "from".
-// Fase 1: un unico canale, tutti ricevono tutti tranne se stessi.
-func (r *Room) wants(to, from *Peer) bool { return to != from }
-
 func (r *Room) forwardTrack(p *Peer, remote *webrtc.TrackRemote) {
-	id := p.ID + "-" + remote.ID()
-	local, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, id, p.ID)
-	if err != nil {
-		log.Printf("[%s] traccia non inoltrabile: %v", p.ID, err)
-		return
+	f := &forward{
+		id:    p.ID + "-" + remote.ID(),
+		owner: p,
+		kind:  remote.Kind(),
+		codec: remote.Codec().RTPCodecCapability,
 	}
-	f := &forward{owner: p, local: local, kind: remote.Kind()}
+	f.dests.Store(&[]*dest{})
 	if remote.Kind() == webrtc.RTPCodecTypeVideo {
 		ssrc := uint32(remote.SSRC())
 		f.pli = func() {
 			_ = p.pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: ssrc}})
 		}
 	}
-	log.Printf("[%s %s] nuovo flusso %s (%s)", p.ID, p.Name, remote.Kind(), remote.Codec().MimeType)
+	log.Printf("[%s] nuovo flusso %s (%s)", p.Label, remote.Kind(), remote.Codec().MimeType)
 
 	r.mu.Lock()
-	r.tracks[id] = f
+	r.tracks[f.id] = f
 	r.syncLocked()
 	r.mu.Unlock()
 
@@ -216,55 +370,95 @@ func (r *Room) forwardTrack(p *Peer, remote *webrtc.TrackRemote) {
 	}
 
 	buf := make([]byte, 1500)
+	pkt := &rtp.Packet{}
 	for {
 		n, _, err := remote.Read(buf)
 		if err != nil {
 			break
 		}
-		// Write riscrive SSRC e payload type per ogni destinatario.
-		if _, err := local.Write(buf[:n]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-			break
+		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			continue
+		}
+		for _, d := range *f.dests.Load() {
+			if !d.open.Load() {
+				continue
+			}
+			// Numerazione continua per ogni ascoltatore: i pacchetti saltati
+			// mentre il rubinetto era chiuso non sembrano "persi" al browser.
+			d.seq++
+			out := *pkt
+			out.Header.SequenceNumber = d.seq
+			_ = d.local.WriteRTP(&out)
 		}
 	}
 	close(stop)
 
 	r.mu.Lock()
-	delete(r.tracks, id)
+	delete(r.tracks, f.id)
 	r.syncLocked()
 	r.mu.Unlock()
 }
 
-// syncLocked allinea per ogni peer i flussi ricevuti a quelli desiderati
-// e, se qualcosa è cambiato, avvia una nuova negoziazione.
+// syncLocked allinea per ogni peer i flussi ricevuti a quelli desiderati,
+// aggiorna i rubinetti e, se qualcosa è cambiato, rinegozia.
 func (r *Room) syncLocked() {
-	for _, p := range r.peers {
-		if p.closed {
-			continue
-		}
+	for _, f := range r.tracks {
 		changed := false
-		for id, sender := range p.senders {
-			f, ok := r.tracks[id]
-			if !ok || !r.wants(p, f.owner) {
-				_ = p.pc.RemoveTrack(sender)
-				delete(p.senders, id)
+		list := *f.dests.Load()
+		next := make([]*dest, 0, len(list))
+		for _, d := range list {
+			if d.to.closed || !subscribed(d.to, f.owner) {
+				if !d.to.closed {
+					_ = d.to.pc.RemoveTrack(d.sender)
+					delete(d.to.senders, f.id)
+					d.to.needsOffer = true
+				}
 				changed = true
-			}
-		}
-		for id, f := range r.tracks {
-			if _, ok := p.senders[id]; ok || !r.wants(p, f.owner) {
 				continue
 			}
-			sender, err := p.pc.AddTrack(f.local)
+			next = append(next, d)
+		}
+		for _, p := range r.peers {
+			if p.closed || p == f.owner || !subscribed(p, f.owner) {
+				continue
+			}
+			if _, ok := p.senders[f.id]; ok {
+				continue
+			}
+			local, err := webrtc.NewTrackLocalStaticRTP(f.codec, f.id, f.owner.ID)
+			if err != nil {
+				continue
+			}
+			sender, err := p.pc.AddTrack(local)
 			if err != nil {
 				log.Printf("[%s] AddTrack: %v", p.ID, err)
 				continue
 			}
-			p.senders[id] = sender
+			d := &dest{to: p, local: local, sender: sender}
+			p.senders[f.id] = d
+			p.needsOffer = true
+			next = append(next, d)
 			changed = true
 			go readRTCP(sender, f)
 		}
 		if changed {
+			f.dests.Store(&next)
+		}
+	}
+	r.updateGatesLocked()
+	r.syncVideoLocked()
+	for _, p := range r.peers {
+		if p.needsOffer && !p.closed {
 			p.negotiateLocked()
+		}
+	}
+}
+
+// updateGatesLocked apre o chiude ogni rubinetto in base a chi parla e chi ascolta.
+func (r *Room) updateGatesLocked() {
+	for _, f := range r.tracks {
+		for _, d := range *f.dests.Load() {
+			d.open.Store(audible(f.owner, d.to))
 		}
 	}
 }
@@ -312,7 +506,7 @@ func (p *Peer) negotiateLocked() {
 	case <-gathered:
 	case <-time.After(2 * time.Second):
 	}
-	p.send(Message{Type: "offer", SDP: p.pc.LocalDescription().SDP})
+	p.send(Message{Type: "offer", SDP: p.pc.LocalDescription().SDP, Video: p.videoSlotsLocked()})
 }
 
 // HandleAnswer applica la risposta SDP del browser.
@@ -337,15 +531,41 @@ func (p *Peer) AddCandidate(c webrtc.ICECandidateInit) error {
 	return p.pc.AddICECandidate(c)
 }
 
-// SetMic aggiorna lo stato del microfono (per l'indicatore "sta parlando").
-func (p *Peer) SetMic(on bool) {
+// SetTalk imposta i canali su cui il partecipante sta parlando.
+// I canali di cui non è membro vengono ignorati.
+func (p *Peer) SetTalk(channels []string) {
 	r := p.room
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if p.mic != on {
-		p.mic = on
-		r.broadcastPeersLocked()
+	next := map[string]bool{}
+	for _, c := range channels {
+		if r.canTalkLocked(p, c) {
+			next[c] = true
+		}
 	}
+	if sameSet(next, p.talk) {
+		return
+	}
+	p.talk = next
+	r.updateGatesLocked()
+	r.broadcastPeersLocked()
+}
+
+// SetListen attiva o disattiva l'ascolto di un canale di cui è membro.
+func (p *Peer) SetListen(channel string, on bool) {
+	r := p.room
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !p.member[channel] || p.muted[channel] == !on {
+		return
+	}
+	if on {
+		delete(p.muted, channel)
+	} else {
+		p.muted[channel] = true
+	}
+	r.updateGatesLocked()
+	r.broadcastPeersLocked()
 }
 
 // Close scollega il partecipante. Si può chiamare più volte.
@@ -358,15 +578,57 @@ func (p *Peer) Close() {
 	}
 	p.closed = true
 	delete(r.peers, p.ID)
+	ownVideos := false
+	for _, s := range r.videos {
+		if s.owner == p {
+			r.dropVideoLocked(s)
+			ownVideos = true
+		}
+	}
+	r.syncLocked() // toglie le sue copie dai flussi degli altri
+	if ownVideos {
+		r.broadcastVideosLocked()
+	}
 	r.mu.Unlock()
 
-	// Chiudere la connessione fa terminare forwardTrack, che rimuove i flussi.
+	// Chiudere la connessione fa terminare forwardTrack, che rimuove i suoi flussi.
 	_ = p.pc.Close()
 
 	r.mu.Lock()
 	r.broadcastPeersLocked()
 	r.mu.Unlock()
-	log.Printf("[%s %s] uscito", p.ID, p.Name)
+	log.Printf("[%s] uscito", p.Label)
+}
+
+func (p *Peer) infoLocked() PeerInfo {
+	r := p.room
+	return PeerInfo{
+		ID:       p.ID,
+		Name:     p.Name,
+		Role:     p.Role,
+		Channels: r.orderedLocked(p.member),
+		Admin:    r.orderedLocked(p.admin),
+		Talk:     r.orderedLocked(p.speaking()),
+		Forced:   r.orderedLocked(p.forced),
+		Muted:    r.orderedLocked(p.muted),
+		Avatar:   p.avatar,
+		AvatarV:  p.avatarVer,
+	}
+}
+
+// speaking: canali su cui la sua voce esce davvero (chiesti da lui o aperti dal responsabile).
+func (p *Peer) speaking() map[string]bool {
+	if len(p.forced) == 0 {
+		return p.talk
+	}
+	out := make(map[string]bool, len(p.talk)+len(p.forced))
+	for c := range p.talk {
+		out[c] = true
+	}
+	for c := range p.forced {
+		out[c] = true
+	}
+	return out
 }
 
 func (r *Room) broadcastPeersLocked() {
@@ -379,9 +641,14 @@ func (r *Room) broadcastPeersLocked() {
 func (r *Room) peerListLocked() []PeerInfo {
 	list := make([]PeerInfo, 0, len(r.peers))
 	for _, p := range r.peers {
-		list = append(list, PeerInfo{ID: p.ID, Name: p.Name, Mic: p.mic})
+		list = append(list, p.infoLocked())
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Name != list[j].Name {
+			return list[i].Name < list[j].Name
+		}
+		return list[i].ID < list[j].ID
+	})
 	return list
 }
 

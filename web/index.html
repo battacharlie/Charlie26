@@ -3,39 +3,97 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#0d0f12">
+  <meta name="theme-color" content="#0d4a5f">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Intercom</title>
-  <link rel="icon" href="data:,">
+  <title>CHARLIE26 – Intercom Evoluto</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-role="tecnico">
   <div class="app" id="app">
     <!-- Schermata di ingresso -->
     <section class="join" id="joinView">
-      <h1>Intercom di produzione</h1>
-      <p class="muted">Scrivi il tuo nome e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
-      <input type="text" id="nameInput" placeholder="Il tuo nome (es. Marco – Cam 2)" autocomplete="nickname" maxlength="24">
+      <div class="brand big"><img src="/static/brand/icon-192.png" alt=""><div><span class="word">CHARLIE<b>26</b></span><span class="tag">INTERCOM EVOLUTO</span></div></div>
+      <h1 id="eventTitle" class="sr-only">CHARLIE26 – Intercom Evoluto</h1>
+
+      <!-- Libero accesso -->
+      <div id="freeForm" class="hidden">
+        <p class="muted">Scegli il tuo canale e premi Entra. Il browser ti chiederà il permesso di usare il microfono: rispondi <b>Consenti</b>.</p>
+        <label class="field">Il tuo nome
+          <input type="text" id="nameInput" placeholder="es. Marco – Cam 2" autocomplete="nickname" maxlength="24">
+        </label>
+        <label class="field">Canale
+          <select id="channelInput"></select>
+        </label>
+        <label class="field hidden" id="passwordField">Password del canale
+          <input type="password" id="passwordInput" autocomplete="off">
+        </label>
+        <div id="createFields" class="hidden">
+          <label class="field">Nome del nuovo canale
+            <input type="text" id="createName" maxlength="24" placeholder="es. Palco">
+          </label>
+          <label class="field">Password per entrare (facoltativa)
+            <input type="password" id="createPassword" autocomplete="new-password">
+          </label>
+          <p class="muted small">Chi crea il canale ne diventa il <b>caporeparto</b>: parla anche nel canale principale e gestisce i microfoni del suo canale.</p>
+        </div>
+      </div>
+
+      <!-- Accesso con credenziali -->
+      <div id="loginForm" class="hidden">
+        <div id="keyLogin" class="hidden">
+          <p class="hello">Ciao <b id="keyName"></b>! Premi <b>Entra</b> e rispondi <b>Consenti</b> alla richiesta del microfono.</p>
+          <p class="small"><a href="#" id="otherUser">Non sei tu? Accedi con nome utente e password</a></p>
+        </div>
+        <div id="loginFields">
+          <p class="muted">Accedi con il nome utente e la password che ti ha dato la regia.</p>
+          <label class="field">Nome utente
+            <input type="text" id="userInput" autocomplete="username" autocapitalize="off" autocorrect="off">
+          </label>
+          <label class="field">Password
+            <input type="password" id="userPassword" autocomplete="current-password">
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <span>Il tuo avatar</span>
+        <div class="avatar-picker" id="avatarPicker"></div>
+      </div>
       <button class="btn" id="joinBtn">Entra</button>
       <div class="banner error hidden" id="joinError"></div>
+      <p class="credits">CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – <a href="https://www.andreabattaglioli.it" target="_blank" rel="noopener">www.andreabattaglioli.it</a> · ABit/s · Made in Bolognina</p>
     </section>
 
     <!-- Schermata intercom -->
-    <section class="hidden" id="talkView" style="display:flex;flex-direction:column;flex:1">
+    <section class="talk hidden" id="talkView">
       <div class="topbar">
+        <a class="mark" href="https://www.andreabattaglioli.it" target="_blank" rel="noopener" title="CHARLIE26 – Intercom Evoluto · Andrea Battaglioli"><img src="/static/brand/icon-192.png" alt="CHARLIE26"></a>
         <span class="dot" id="connDot"></span>
-        <span class="channel">Produzione</span>
+        <button class="me-avatar" id="meAvatar" title="Cambia avatar"></button>
+        <span class="me" id="meLabel"></span>
         <span class="status" id="connText">connessione…</span>
+        <button class="exit" id="exitBtn" title="Esci">Esci</button>
       </div>
       <div class="banner hidden" id="talkBanner"></div>
-      <ul class="peers" id="peerList"></ul>
-      <div class="mic-area">
-        <button class="mic" id="micBtn" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
-          <span id="micLabel">MUTO</span>
-        </button>
-        <div class="hint">Tocca per aprire/chiudere · Tieni premuto per parlare</div>
+      <div class="video-wrap" id="videoWrap">
+        <div class="video-head">
+          <div class="seg small-seg q" title="Qualità del video ricevuto">
+            <button data-q="h">Alta</button><button data-q="l">Bassa</button><button data-q="off">Spento</button>
+          </div>
+          <button class="mini" id="videoStartBtn">📹 Mostra video</button>
+        </div>
+        <div class="video-tiles" id="videoArea"></div>
       </div>
+      <div class="channels" id="channelList"></div>
+      <details class="people">
+        <summary>Collegati (<span id="peerCount">0</span>)</summary>
+        <ul class="peers" id="peerList"></ul>
+      </details>
+      <div class="mic-area" id="bigMicArea"></div>
+      <a class="sign" href="https://www.andreabattaglioli.it" target="_blank" rel="noopener"><b>CHARLIE<span>26</span></b> Intercom Evoluto · Andrea Battaglioli – www.andreabattaglioli.it · ABit/s · Made in Bolognina</a>
     </section>
   </div>
   <script src="/static/app.js"></script>

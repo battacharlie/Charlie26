@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><title>Bit</title>
+<rect width="64" height="64" rx="14" fill="#1f3b2c"/>
+<path d="M16 22 L12 10 L22 18 Z M48 22 L52 10 L42 18 Z" fill="#7bd88f"/>
+<ellipse cx="32" cy="38" rx="20" ry="19" fill="#7bd88f"/>
+<circle cx="32" cy="33" r="10" fill="#fff"/>
+<circle cx="32" cy="33" r="11.5" fill="none" stroke="#111" stroke-width="3.5"/>
+<path d="M20.5 33 H14 M43.5 33 H50" stroke="#111" stroke-width="3"/>
+<circle cx="34" cy="34" r="4.5" fill="#111"/><circle cx="35.5" cy="32.5" r="1.4" fill="#fff"/>
+<path d="M25 47 Q32 52 39 47" stroke="#0f2a18" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+<rect x="30" y="47.5" width="4" height="3.5" fill="#fff"/>
+</svg>
