@@ -19,6 +19,7 @@ import (
 
 	"github.com/battacharlie/charlie26/internal/certs"
 	"github.com/battacharlie/charlie26/internal/evento"
+	"github.com/battacharlie/charlie26/internal/netinfo"
 	"github.com/battacharlie/charlie26/internal/sfu"
 	"github.com/battacharlie/charlie26/web"
 )
@@ -682,5 +683,44 @@ func TestPagesAndCA(t *testing.T) {
 	resp.Body.Close()
 	if resp.Header.Get("Content-Type") != "image/png" {
 		t.Fatalf("QR: content-type %q", resp.Header.Get("Content-Type"))
+	}
+}
+
+func TestChangeNetwork(t *testing.T) {
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+	var asked string
+	srv := New(Config{Host: "192.168.1.10", HTTPSPort: 8443, HTTPPort: 8080, Web: web.FS, Room: room,
+		DetectIPs: func() []netinfo.Address {
+			return []netinfo.Address{{IP: "192.168.1.10", Interface: "Ethernet"}, {IP: "10.0.0.7", Interface: "Wi-Fi"}}
+		},
+		ChangeIP: func(ip string) (string, error) { asked = ip; return ip, nil },
+	})
+	ts := httptest.NewTLSServer(srv.HTTPSHandler())
+	defer ts.Close()
+
+	resp, err := ts.Client().Post(ts.URL+"/api/regia/rete", "application/json", strings.NewReader(`{"ip":"10.0.0.7"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Host, AppURL string
+		IPs          []netinfo.Address
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if asked != "10.0.0.7" || out.Host != "10.0.0.7" || out.AppURL != "https://10.0.0.7:8443/" || len(out.IPs) != 2 {
+		t.Fatalf("cambio rete: %+v (richiesto %q)", out, asked)
+	}
+	if srv.AppURL() != "https://10.0.0.7:8443/" || !strings.Contains(srv.HelpURL(), "10.0.0.7") {
+		t.Fatal("i QR devono puntare al nuovo IP")
+	}
+	resp, _ = ts.Client().Post(ts.URL+"/api/regia/rete", "application/json", strings.NewReader(`{"ip":"non-un-ip"}`))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || srv.Host() != "10.0.0.7" {
+		t.Fatal("un IP non valido deve essere rifiutato senza cambiare nulla")
 	}
 }

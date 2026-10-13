@@ -326,3 +326,6 @@ a.mini { text-decoration: none; display: inline-block; }
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
 .dialog { max-width: 420px; width: 100%; }
 .log { background: #0a0c0f; border: 1px solid var(--line); border-radius: 8px; padding: .6rem; font-size: .75rem; line-height: 1.35; height: calc(100% - 3rem); min-height: 160px; overflow: auto; margin: 0; white-space: pre-wrap; }
+.net { margin-top: .7rem; }
+.net-row { display: flex; gap: .4rem; margin-top: .2rem; }
+.net-row select { padding: .4rem .5rem; font-size: .85rem; border-radius: 8px; flex: 1; min-width: 0; }

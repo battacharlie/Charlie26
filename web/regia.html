@@ -17,13 +17,20 @@
       </div>
       <div class="qr-pair">
         <figure>
-          <img class="qr" src="/qr/app.png" alt="QR code dell'app tecnici">
-          <figcaption><b>Tecnici</b><span class="url">{{APP_URL}}</span></figcaption>
+          <img class="qr" id="qrApp" src="/qr/app.png" alt="QR code dell'app tecnici">
+          <figcaption><b>Tecnici</b><span class="url" id="appUrl">{{APP_URL}}</span></figcaption>
         </figure>
         <figure id="helpBox">
-          <img class="qr" src="/qr/aiuto.png" alt="QR code della pagina di aiuto">
+          <img class="qr" id="qrHelp" src="/qr/aiuto.png" alt="QR code della pagina di aiuto">
           <figcaption><b>Aiuto certificato</b><span class="small muted">se il telefono dice "connessione non privata"</span></figcaption>
         </figure>
+      </div>
+      <div class="net">
+        <label for="netSelect" class="small muted">Rete usata nei QR</label>
+        <div class="net-row">
+          <select id="netSelect"></select>
+          <button class="mini" id="netRefresh" title="Cerca di nuovo le schede di rete">↻</button>
+        </div>
       </div>
       <h2>Anteprime video</h2>
       <!-- Fase 5: un riquadro per ogni segnale inviato, aggiornato al massimo a 15 fps. -->

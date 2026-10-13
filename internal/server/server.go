@@ -34,6 +34,12 @@ type Config struct {
 	IPs       []netinfo.Address
 	Log       func() []string // ultime righe del registro (può essere nil)
 	Shutdown  func()          // spegne il programma (può essere nil)
+
+	// ChangeIP prepara il programma a usare un altro IP (certificato,
+	// impostazioni salvate) e restituisce l'host da mettere nei QR.
+	ChangeIP func(ip string) (host string, err error)
+	// DetectIPs rileva di nuovo le schede di rete (può essere nil).
+	DetectIPs func() []netinfo.Address
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
@@ -41,23 +47,39 @@ type Server struct {
 	cfg      Config
 	upgrader websocket.Upgrader
 
+	hostMu sync.RWMutex
+	host   string // IP o nome a cui puntano i QR (cambiabile dalla console)
+
 	rnnoiseOnce sync.Once
 	rnnoise     []byte
 }
 
 // New crea il server.
 func New(cfg Config) *Server {
-	return &Server{cfg: cfg}
+	return &Server{cfg: cfg, host: cfg.Host}
+}
+
+// Host restituisce l'IP o il nome usato nei QR.
+func (s *Server) Host() string {
+	s.hostMu.RLock()
+	defer s.hostMu.RUnlock()
+	return s.host
+}
+
+func (s *Server) setHost(h string) {
+	s.hostMu.Lock()
+	s.host = h
+	s.hostMu.Unlock()
 }
 
 // AppURL è l'indirizzo che i tecnici aprono dal telefono.
 func (s *Server) AppURL() string {
-	return fmt.Sprintf("https://%s%s/", s.cfg.Host, portSuffix(s.cfg.HTTPSPort, 443))
+	return fmt.Sprintf("https://%s%s/", s.Host(), portSuffix(s.cfg.HTTPSPort, 443))
 }
 
 // HelpURL è la pagina di aiuto in HTTP semplice, apribile anche prima di fidarsi del certificato.
 func (s *Server) HelpURL() string {
-	return fmt.Sprintf("http://%s%s/aiuto", s.cfg.Host, portSuffix(s.cfg.HTTPPort, 80))
+	return fmt.Sprintf("http://%s%s/aiuto", s.Host(), portSuffix(s.cfg.HTTPPort, 80))
 }
 
 // ConsoleURL è l'indirizzo della console sulla macchina di regia.
@@ -85,6 +107,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("GET /api/regia/esporta", s.onlyRegia(s.handleExport))
 	mux.HandleFunc("POST /api/regia/importa", s.onlyRegia(s.handleImport))
 	mux.HandleFunc("GET /api/regia/registro", s.onlyRegia(s.handleLog))
+	mux.HandleFunc("GET /api/regia/rete", s.onlyRegia(s.handleNetGet))
+	mux.HandleFunc("POST /api/regia/rete", s.onlyRegia(s.handleNetSet))
 	mux.HandleFunc("POST /api/regia/spegni", s.onlyRegia(s.handleShutdown))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /{$}", s.page("index.html"))
@@ -101,7 +125,7 @@ func (s *Server) HTTPHandler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host := hostOnly(r.Host)
 		if host == "" {
-			host = s.cfg.Host
+			host = s.Host()
 		}
 		target := fmt.Sprintf("https://%s%s%s", host, portSuffix(s.cfg.HTTPSPort, 443), r.URL.RequestURI())
 		http.Redirect(w, r, target, http.StatusFound)
@@ -171,7 +195,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"appURL":   s.AppURL(),
 		"helpURL":  s.HelpURL(),
 		"certMode": s.cfg.CertMode,
-		"host":     s.cfg.Host,
+		"host":     s.Host(),
 		"ips":      s.cfg.IPs,
 		"peers":    s.cfg.Room.Peers(),
 		"channels": s.cfg.Room.Channels(),

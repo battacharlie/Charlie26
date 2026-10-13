@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -97,6 +98,38 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.cfg.Room.Event())
+}
+
+func (s *Server) netInfo() map[string]any {
+	ips := s.cfg.IPs
+	if s.cfg.DetectIPs != nil {
+		ips = s.cfg.DetectIPs()
+	}
+	return map[string]any{"host": s.Host(), "ips": ips, "appURL": s.AppURL(), "helpURL": s.HelpURL(), "canChange": s.cfg.ChangeIP != nil}
+}
+
+func (s *Server) handleNetGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.netInfo())
+}
+
+// handleNetSet cambia la scheda di rete usata nei QR.
+func (s *Server) handleNetSet(w http.ResponseWriter, r *http.Request) {
+	var req struct{ IP string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil || net.ParseIP(req.IP) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "IP non valido"})
+		return
+	}
+	if s.cfg.ChangeIP == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "non disponibile"})
+		return
+	}
+	host, err := s.cfg.ChangeIP(req.IP)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.setHost(host)
+	writeJSON(w, http.StatusOK, s.netInfo())
 }
 
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {

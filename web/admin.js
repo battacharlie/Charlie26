@@ -224,5 +224,46 @@
     body.append(el('p', { class: 'small muted' }, 'Il caporeparto parla sempre anche nel canale principale. Le modifiche valgono subito anche per chi è già collegato.'));
   }
 
+  // ---------- Scheda di rete usata nei QR ----------
+  const netSel = $('netSelect');
+  async function loadNet(info) {
+    if (!netSel) return;
+    if (!info) {
+      const r = await fetch('/api/regia/rete');
+      if (!r.ok) return;
+      info = await r.json();
+    }
+    netSel.textContent = '';
+    let found = false;
+    for (const a of info.ips || []) {
+      const sel = info.host === a.ip || info.host.startsWith(a.ip.replace(/\./g, '-') + '.');
+      found = found || sel;
+      netSel.append(el('option', { value: a.ip }, a.ip + ' — ' + a.interface));
+      if (sel) netSel.value = a.ip;
+    }
+    if (!found) {
+      netSel.prepend(el('option', { value: '' }, info.host + ' (non più attiva)'));
+      netSel.value = '';
+    }
+    netSel.disabled = !info.canChange;
+    // Aggiorna QR e indirizzi mostrati.
+    const bust = '?t=' + Date.now();
+    $('qrApp').src = '/qr/app.png' + bust;
+    $('qrHelp').src = '/qr/aiuto.png' + bust;
+    $('appUrl').textContent = info.appURL;
+  }
+  if (netSel) {
+    netSel.addEventListener('change', async () => {
+      if (!netSel.value) return;
+      const r = await fetch('/api/regia/rete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: netSel.value }) });
+      const out = await r.json();
+      if (!r.ok) { notify(out.error || 'Cambio rete non riuscito', true); return; }
+      loadNet(out);
+      notify('I QR ora puntano a ' + out.host + '. Chi è già collegato non viene disturbato.');
+    });
+    $('netRefresh').addEventListener('click', () => loadNet());
+    loadNet();
+  }
+
   load();
 })();

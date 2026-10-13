@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/battacharlie/charlie26/internal/certs"
@@ -69,7 +70,17 @@ func main() {
 	say("\n  INTERCOM REGIA %s\n  ─────────────────────────────\n", version)
 
 	ips := netinfo.Detect()
+	settingsPath := filepath.Join(*dataDir, "impostazioni.json")
+	settings := loadSettings(settingsPath)
 	host := *ipFlag
+	if host == "" && settings.IP != "" {
+		// La scheda scelta l'ultima volta dalla console, se è ancora attiva.
+		for _, a := range ips {
+			if a.IP == settings.IP {
+				host = a.IP
+			}
+		}
+	}
 	if host == "" && len(ips) > 0 {
 		host = ips[0].IP
 	}
@@ -108,8 +119,7 @@ func main() {
 		certMode = "dominio"
 		tlsCert = pair
 		if *domain != "" {
-			// 192.168.1.10 -> 192-168-1-10.intercom.esempio.it
-			host = strings.ReplaceAll(host, ".", "-") + "." + strings.TrimPrefix(*domain, "*.")
+			host = domainHost(host, *domain)
 		}
 		if err := pair.Leaf.VerifyHostname(host); err != nil {
 			say("  ⚠ Il certificato di dominio non copre %q: i telefoni vedranno un avviso.\n", host)
@@ -125,6 +135,9 @@ func main() {
 		}
 		if hn, err := os.Hostname(); err == nil && hn != "" {
 			hosts = append(hosts, hn)
+		}
+		if settings.IP != "" {
+			hosts = append(hosts, settings.IP)
 		}
 		local, err := certs.EnsureLocal(certDir, hosts)
 		if err != nil {
@@ -163,6 +176,8 @@ func main() {
 
 	quit := make(chan struct{})
 	var quitOnce sync.Once
+	var currentCert atomic.Pointer[tls.Certificate] // sostituibile se cambia la rete
+	currentCert.Store(&tlsCert)
 
 	srv := server.New(server.Config{
 		Host:      host,
@@ -175,6 +190,33 @@ func main() {
 		IPs:       ips,
 		Log:       reg.Lines,
 		Shutdown:  func() { quitOnce.Do(func() { close(quit) }) },
+		DetectIPs: netinfo.Detect,
+		ChangeIP: func(ip string) (string, error) {
+			newHost := ip
+			if certMode == "dominio" {
+				if *domain != "" {
+					newHost = domainHost(ip, *domain)
+				}
+			} else {
+				// Il certificato deve coprire anche il nuovo IP (stessa CA: i
+				// telefoni che l'hanno installata restano a posto).
+				hosts := []string{ip}
+				for _, a := range netinfo.Detect() {
+					hosts = append(hosts, a.IP)
+				}
+				local, err := certs.EnsureLocal(certDir, hosts)
+				if err != nil {
+					return "", err
+				}
+				currentCert.Store(&local.Server)
+			}
+			settings.IP = ip
+			if err := saveSettings(settingsPath, settings); err != nil {
+				log.Printf("impossibile salvare le impostazioni: %v", err)
+			}
+			log.Printf("rete cambiata dalla console: i QR ora puntano a %s", newHost)
+			return newHost, nil
+		},
 	})
 
 	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
@@ -185,8 +227,11 @@ func main() {
 		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
 	}
 	hs := &http.Server{
-		Handler:           srv.HTTPSHandler(),
-		TLSConfig:         server.TLSConfig(tlsCert),
+		Handler: srv.HTTPSHandler(),
+		TLSConfig: &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return currentCert.Load(), nil },
+		},
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          log.New(tlsNoise{}, "", 0),
 	}
@@ -227,6 +272,32 @@ func main() {
 	runDesktop(desktop{consoleURL: srv.ConsoleURL(), appURL: srv.AppURL(), dataDir: *dataDir, quit: quit})
 	say("\n  Spegnimento…\n")
 	_ = hs.Close()
+}
+
+// domainHost: 192.168.1.10 + intercom.esempio.it -> 192-168-1-10.intercom.esempio.it
+func domainHost(ip, domain string) string {
+	return strings.ReplaceAll(ip, ".", "-") + "." + strings.TrimPrefix(domain, "*.")
+}
+
+// settings sono le scelte fatte dalla console che valgono anche al riavvio.
+type settings struct {
+	IP string `json:"ip,omitempty"` // scheda di rete scelta per i QR
+}
+
+func loadSettings(path string) *settings {
+	s := &settings{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, s)
+	}
+	return s
+}
+
+func saveSettings(path string, s *settings) error {
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o600)
 }
 
 // reg è il registro dei messaggi (finestra, file e console di regia).
