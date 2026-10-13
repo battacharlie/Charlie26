@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aiuto – Intercom</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="doc">
+    <h1>Collegare il telefono all'intercom</h1>
+    <p class="muted">Il microfono funziona solo su una pagina sicura (https). Il computer di regia usa un proprio certificato: il telefono deve fidarsi di lui. Si fa <b>una volta sola</b> per telefono.</p>
+
+    <div class="card">
+      <h2 style="margin-top:0">Modo veloce (vale per quasi tutti)</h2>
+      <ol>
+        <li>Apri <a href="{{APP_URL}}">{{APP_URL}}</a></li>
+        <li>Se compare "La connessione non è privata":
+          <ul>
+            <li><b>Android/Chrome</b>: tocca <i>Avanzate</i> › <i>Procedi su … (non sicuro)</i></li>
+            <li><b>iPhone/Safari</b>: tocca <i>Mostra dettagli</i> › <i>visita questo sito web</i> › <i>Visita il sito web</i></li>
+          </ul>
+        </li>
+        <li>Scrivi il tuo nome, premi <b>Entra</b> e rispondi <b>Consenti</b> alla richiesta del microfono.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Modo definitivo: installa il certificato</h2>
+      <p>Niente più avvisi, e serve se su iPhone il microfono non parte dopo il modo veloce.</p>
+      <a class="btn" href="/ca.crt" style="text-align:center;text-decoration:none">Scarica il certificato della regia</a>
+      <h2>iPhone / iPad</h2>
+      <ol>
+        <li>Tocca il pulsante qui sopra (con <b>Safari</b>) e conferma <i>Consenti</i>.</li>
+        <li>Apri <i>Impostazioni</i> › <i>Profilo scaricato</i> › <i>Installa</i> (chiede il codice del telefono).</li>
+        <li>Apri <i>Impostazioni › Generali › Info › Impostazioni certificati attendibili</i> e attiva <b>Intercom Regia CA</b>.</li>
+      </ol>
+      <h2>Android</h2>
+      <ol>
+        <li>Tocca il pulsante qui sopra per scaricare il file.</li>
+        <li>Apri <i>Impostazioni › Sicurezza › Altre impostazioni › Crittografia e credenziali › Installa un certificato › Certificato CA</i> e scegli il file scaricato. (Il percorso cambia un po' da marca a marca: cerca "certificato CA" nelle impostazioni.)</li>
+      </ol>
+      <p class="muted">Il certificato vale solo per il computer di regia che lo ha creato. Si può rimuovere in qualsiasi momento dalle stesse impostazioni.</p>
+    </div>
+
+    <a class="btn secondary" href="{{APP_URL}}" style="text-align:center;text-decoration:none">Vai all'intercom</a>
+  </div>
+</body>
+</html>
