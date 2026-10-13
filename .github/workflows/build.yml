@@ -50,7 +50,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      # L'Android SDK è già installato sulle macchine di GitHub: aggiungiamo solo
+      # la piattaforma e gli strumenti usati dall'app.
+      - name: Componenti Android SDK
+        run: |
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null || echo "::warning::sdkmanager non riuscito: ci prova Gradle"
+          ls "$ANDROID_HOME/platforms" || true
       - name: Compila app Android
         working-directory: mobile
         env:
