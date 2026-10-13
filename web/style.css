@@ -363,3 +363,4 @@ a.mini { text-decoration: none; display: inline-block; }
 .previews { align-content: start; overflow: auto; }
 .previews .vtile { aspect-ratio: 16 / 9; }
 .previews .vact .mini { padding: .25rem .5rem; font-size: .72rem; }
+code.url { flex: 1; min-width: 0; background: #0a0c0f; border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem; font-size: .75rem; }

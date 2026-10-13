@@ -68,6 +68,8 @@ type Event struct {
 	Mode     string    `json:"mode"`
 	Channels []Channel `json:"channels"`
 	Users    []User    `json:"users,omitempty"`
+	// WHIPToken è la chiave che OBS deve usare per inviare video (WHIP).
+	WHIPToken string `json:"whipToken,omitempty"`
 }
 
 // New crea un evento in libero accesso con il canale principale e i reparti indicati.

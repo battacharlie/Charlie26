@@ -1076,3 +1076,102 @@ func TestVideo(t *testing.T) {
 	capo.ws.Close()
 	expectVideo(t, cam2, pv+"/L")
 }
+
+// WHIP: un client come OBS invia video con la chiave.
+func TestWHIP(t *testing.T) {
+	ts, room := startServer(t, credentialsEvent(t))
+	user := func(u string) map[string]any { return map[string]any{"session": login(t, ts, u, "pass-"+u)} }
+	regia := newFakePhone(t, ts, "Regia", map[string]any{"regia": true})
+	capo := newFakePhone(t, ts, "CapoVideo", user("capovideo")) // in Produzione (video della regia abilitato)
+	cam1 := newFakePhone(t, ts, "Cam1", user("cam1"))           // solo canale Video (non abilitato)
+
+	token := room.WHIPToken(false)
+	se := webrtc.SettingEngine{}
+	se.SetIncludeLoopbackCandidate(true)
+	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	obs, err := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer obs.Close()
+	track, _ := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"}, "obs", "obs")
+	if _, err := obs.AddTransceiverFromTrack(track, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}); err != nil {
+		t.Fatal(err)
+	}
+	offer, _ := obs.CreateOffer(nil)
+	done := webrtc.GatheringCompletePromise(obs)
+	_ = obs.SetLocalDescription(offer)
+	<-done
+
+	post := func(tok string) *http.Response {
+		req, _ := http.NewRequest("POST", ts.URL+"/whip?titolo=Programma", strings.NewReader(obs.LocalDescription().SDP))
+		req.Header.Set("Content-Type", "application/sdp")
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	if resp := post("sbagliata"); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("chiave sbagliata: %d", resp.StatusCode)
+	}
+	resp := post(token)
+	answer, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated || !strings.HasPrefix(resp.Header.Get("Location"), "/whip/v") {
+		t.Fatalf("WHIP: %d %s", resp.StatusCode, answer)
+	}
+	if err := obs.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: string(answer)}); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		tk := time.NewTicker(33 * time.Millisecond)
+		defer tk.Stop()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+			}
+			frame := []byte{0, 0, 0, 1, 0x41, 'H', 9, 9}
+			if i%15 == 0 {
+				frame = []byte{0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x1f, 0, 0, 0, 1, 0x65, 'H', 1, 2}
+			}
+			_ = track.WriteSample(media.Sample{Data: frame, Duration: 33 * time.Millisecond})
+		}
+	}()
+	id := strings.TrimPrefix(resp.Header.Get("Location"), "/whip/")
+	v := "v:" + id
+	// Una sola corsia: anche con qualità bassa arriva la H. Il canale Video
+	// (video della regia non abilitato) non lo riceve.
+	expectVideo(t, capo, v+"/H")
+	expectVideo(t, regia, v+"/H")
+	expectVideo(t, cam1)
+	if vs := room.Videos(); len(vs) != 1 || vs[0].Label != "Programma" || vs[0].OwnerName != "OBS" {
+		t.Fatalf("elenco video: %+v", vs)
+	}
+	// La regia lo manda solo al canale Video... che però non lo ha abilitato:
+	// non lo vede più nessuno tranne la regia.
+	regia.write(map[string]any{"type": "videoChannels", "stream": id, "channels": []string{"video"}})
+	expectVideo(t, capo)
+	expectVideo(t, regia, v+"/H")
+	// Un tecnico non può cambiare i canali.
+	cam1.write(map[string]any{"type": "videoChannels", "stream": id, "channels": []string{"produzione"}})
+	expectMsg(t, cam1, "error")
+
+	// Stop da OBS (DELETE con la chiave).
+	req, _ := http.NewRequest("DELETE", ts.URL+resp.Header.Get("Location"), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	dr, err := ts.Client().Do(req)
+	if err != nil || dr.StatusCode != 200 {
+		t.Fatalf("DELETE: %v %v", err, dr)
+	}
+	dr.Body.Close()
+	if len(room.Videos()) != 0 {
+		t.Fatal("dopo DELETE il video deve sparire")
+	}
+	expectVideo(t, regia)
+}

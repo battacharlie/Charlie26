@@ -111,6 +111,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/regia/importa", s.onlyRegia(s.handleImport))
 	mux.HandleFunc("GET /api/regia/registro", s.onlyRegia(s.handleLog))
 	mux.HandleFunc("GET /api/regia/rete", s.onlyRegia(s.handleNetGet))
+	mux.HandleFunc("GET /api/regia/whip", s.onlyRegia(s.handleWHIPInfo))
+	mux.HandleFunc("POST /api/regia/whip", s.onlyRegia(s.handleWHIPInfo))
 	mux.HandleFunc("GET /api/regia/modelli", s.onlyRegia(s.handleModels))
 	mux.HandleFunc("POST /api/regia/modelli", s.onlyRegia(s.handleModelOp))
 	mux.HandleFunc("POST /api/regia/rete", s.onlyRegia(s.handleNetSet))
@@ -141,6 +143,10 @@ func (s *Server) HTTPHandler() http.Handler {
 }
 
 func (s *Server) common(mux *http.ServeMux) {
+	// WHIP (OBS) anche sulla porta in chiaro: OBS non si fida del certificato
+	// locale; la chiave nell'intestazione protegge comunque l'accesso.
+	mux.HandleFunc("POST /whip", s.handleWHIP)
+	mux.HandleFunc("DELETE /whip/{id}", s.handleWHIPDelete)
 	mux.HandleFunc("GET /aiuto", s.page("aiuto.html"))
 	mux.HandleFunc("GET /ca.crt", s.handleCA)
 	mux.HandleFunc("GET /qr/{name}", s.handleQR)
@@ -435,6 +441,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					err = peer.ApproveVideo(m.Stream, m.On)
 				}
 				if err != nil {
+					send(sfu.Message{Type: "error", Error: err.Error()})
+				}
+			}
+		case "videoChannels":
+			if peer != nil {
+				if err := peer.SetVideoChannels(m.Stream, m.Channels); err != nil {
 					send(sfu.Message{Type: "error", Error: err.Error()})
 				}
 			}

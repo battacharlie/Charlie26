@@ -1354,6 +1354,7 @@
     joined: () => !!state.me,
     approve: (id, ok) => send({ type: 'videoApprove', stream: id, on: ok }),
     stopRemote: (id) => send({ type: 'videoStop', stream: id }),
+    setChannels: (id, chs) => send({ type: 'videoChannels', stream: id, channels: chs }),
     onchange: null,
   };
 

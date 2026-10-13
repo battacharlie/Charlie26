@@ -252,3 +252,7 @@ func applyOp(e *evento.Event, op eventOp) error {
 	}
 	return nil
 }
+
+func jsonDecode(r *http.Request, v any) error {
+	return json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(v)
+}

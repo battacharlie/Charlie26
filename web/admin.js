@@ -262,13 +262,44 @@
       }
     }
 
+    // Ingresso da OBS (WHIP)
+    body.append(el('h2', {}, 'Video da OBS (WHIP)'));
+    const whipBox = el('div', {});
+    body.append(whipBox);
+    const paintWhip = (w) => {
+      whipBox.textContent = '';
+      const copy = (txt) => el('button', { class: 'mini', onclick: () => { navigator.clipboard.writeText(txt).then(() => notify('Copiato')).catch(() => notify('Copia non riuscita: selezionalo a mano', true)); } }, 'Copia');
+      const line = (label, txt) => el('div', { class: 'row' }, el('span', { class: 'small muted', style: 'min-width:9rem' }, label), el('code', { class: 'url' }, txt), copy(txt));
+      whipBox.append(
+        el('p', { class: 'small muted' }, 'In OBS: Impostazioni → Trasmissione → Servizio "WHIP". Server: uno degli indirizzi qui sotto (aggiungi ?titolo=Programma per dargli un nome). Bearer Token: la chiave.'),
+        line('Server (consigliato)', w.urlHTTP + '?titolo=Programma'),
+        line('Server (https)', w.urlHTTPS + '?titolo=Programma'),
+        line('Bearer Token', w.token),
+        el('div', { class: 'row' }, el('button', { class: 'mini', onclick: async () => {
+          if (!confirm('Creare una nuova chiave? OBS dovrà usare quella nuova.')) return;
+          const r = await fetch('/api/regia/whip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"renew":true}' });
+          paintWhip(await r.json());
+        } }, 'Nuova chiave'), el('span', { class: 'small muted' }, 'L\'indirizzo https funziona solo se il computer con OBS ha installato il certificato della regia.')));
+    };
+    fetch('/api/regia/whip').then((r) => r.json()).then(paintWhip).catch(() => {});
+
     const others = iv.list().filter((v) => !mine.some((l) => l.id === v.id));
     body.append(el('h2', {}, 'Video dei partecipanti'));
     if (!others.length) body.append(el('p', { class: 'small muted' }, 'Nessuno. Quando un tecnico chiede di mostrare un video compare qui (e nelle anteprime) per l\'approvazione.'));
     for (const v of others) {
       body.append(el('div', { class: 'model' },
         el('div', { class: 'who' }, el('b', {}, v.label + (v.approved ? '' : ' — da approvare')),
-          el('span', { class: 'small muted' }, (v.ownerName || 'OBS') + ' · ' + (v.channels || []).map(iv.channelName).join(', '))),
+          v.owner ? el('span', { class: 'small muted' }, (v.ownerName || '') + ' · ' + (v.channels || []).map(iv.channelName).join(', '))
+            : (() => {
+              // Video di OBS: la regia sceglie i canali.
+              const box = el('div', { class: 'chips' });
+              for (const c of iv.myChannels()) {
+                const cb = el('input', { type: 'checkbox', value: c, checked: (v.channels || []).includes(c) });
+                cb.addEventListener('change', () => iv.setChannels(v.id, [...box.querySelectorAll('input:checked')].map((x) => x.value)));
+                box.append(el('label', {}, cb, iv.channelName(c)));
+              }
+              return box;
+            })()),
         v.approved ? null : el('button', { class: 'mini primary', onclick: () => iv.approve(v.id, true) }, 'Approva'),
         el('button', { class: 'mini danger', onclick: () => (v.approved ? iv.stopRemote(v.id) : iv.approve(v.id, false)) }, v.approved ? 'Ferma' : 'Rifiuta')));
     }

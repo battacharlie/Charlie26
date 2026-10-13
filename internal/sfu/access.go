@@ -437,6 +437,7 @@ func (r *Room) Event() *evento.Event {
 		e.Users[i].PasswordHash = ""
 		e.Users[i].QRKey = ""
 	}
+	e.WHIPToken = ""
 	for i := range e.Channels {
 		e.Channels[i].OwnerHashes = nil
 		if e.Channels[i].PasswordHash != "" {

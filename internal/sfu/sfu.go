@@ -84,6 +84,7 @@ type Room struct {
 	peers     map[string]*Peer
 	tracks    map[string]*forward // flussi audio in arrivo, per id
 	videos    map[string]*VideoStream
+	whip      map[string]*webrtc.PeerConnection // ingressi WHIP attivi
 	nextID    int
 	nextVideo int
 }
@@ -189,6 +190,7 @@ func NewRoom(cfg Config) (*Room, error) {
 		peers:    map[string]*Peer{},
 		tracks:   map[string]*forward{},
 		videos:   map[string]*VideoStream{},
+		whip:     map[string]*webrtc.PeerConnection{},
 	}, nil
 }
 
@@ -226,6 +228,15 @@ func (r *Room) Close() error {
 	r.mu.Unlock()
 	for _, p := range peers {
 		p.Close()
+	}
+	r.mu.Lock()
+	ids := make([]string, 0, len(r.whip))
+	for id := range r.whip {
+		ids = append(ids, id)
+	}
+	r.mu.Unlock()
+	for _, id := range ids {
+		r.StopWHIP(id)
 	}
 	return r.mux.Close()
 }
