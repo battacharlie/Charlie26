@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -787,5 +788,47 @@ func TestUserQR(t *testing.T) {
 	}
 	if code, _ := loginKey(strings.Repeat("0", 48)); code != http.StatusUnauthorized {
 		t.Fatal("chiave inventata accettata")
+	}
+}
+
+func TestModels(t *testing.T) {
+	room, err := sfu.NewRoom(sfu.Config{UDPPort: freeUDPPort(t), Event: evento.New("Produzione", []string{"Video"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+	srv := New(Config{Host: "127.0.0.1", HTTPSPort: 8443, Web: web.FS, Room: room, ModelsDir: filepath.Join(t.TempDir(), "modelli")})
+	ts := httptest.NewTLSServer(srv.HTTPSHandler())
+	defer ts.Close()
+	call := func(body string) (int, []map[string]any) {
+		resp, err := ts.Client().Post(ts.URL+"/api/regia/modelli", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var list []map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&list)
+		return resp.StatusCode, list
+	}
+	code, list := call(`{"op":"save","nome":"Concerto piazza"}`)
+	if code != 200 || len(list) != 1 || list[0]["nome"] != "Concerto piazza" || list[0]["file"] != "concerto-piazza.json" {
+		t.Fatalf("salvataggio modello: %d %v", code, list)
+	}
+	// Cambio l'evento, poi ricarico il modello.
+	_ = room.UpdateEvent(func(e *evento.Event) error { _, err := e.AddChannel("Palco"); return err })
+	if len(room.Channels()) != 3 {
+		t.Fatal("canale non aggiunto")
+	}
+	if code, _ := call(`{"op":"load","file":"concerto-piazza.json"}`); code != 200 || len(room.Channels()) != 2 {
+		t.Fatalf("caricamento modello: %d, canali %d", code, len(room.Channels()))
+	}
+	// Nomi di file pericolosi rifiutati.
+	for _, f := range []string{"../evento.json", "..%2Fevento.json", "/etc/passwd", "a.txt"} {
+		if code, _ := call(`{"op":"load","file":"` + f + `"}`); code != 400 {
+			t.Fatalf("file %q accettato", f)
+		}
+	}
+	if code, list := call(`{"op":"delete","file":"concerto-piazza.json"}`); code != 200 || len(list) != 0 {
+		t.Fatalf("eliminazione: %d %v", code, list)
 	}
 }

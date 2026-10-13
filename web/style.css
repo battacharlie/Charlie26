@@ -335,3 +335,6 @@ a.mini { text-decoration: none; display: inline-block; }
 .qr-card img { width: 92px; height: 92px; background: #fff; border-radius: 6px; padding: 3px; flex: none; }
 .qr-card-text { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
 .qr-card-text .row { margin: .3rem 0 0; }
+.models { display: flex; flex-direction: column; gap: .35rem; }
+.model { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; background: #13161a; border: 1px solid var(--line); border-radius: 8px; }
+.model .who { flex: 1; display: flex; flex-direction: column; min-width: 0; }

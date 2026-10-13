@@ -94,8 +94,36 @@
     }
     body.append(modes);
 
+    // Modelli salvati sul computer di regia
+    body.append(el('h2', {}, 'Modelli di evento'));
+    const modelName = el('input', { type: 'text', placeholder: 'Nome del modello (es. Concerto piazza)', maxlength: '60', value: ev.name });
+    const models = el('div', { class: 'models' });
+    const callModels = async (payload, okText) => {
+      const r = await fetch('/api/regia/modelli', payload ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } : {});
+      const out = await r.json();
+      if (!r.ok) { notify(out.error || 'Operazione non riuscita', true); return; }
+      paintModels(out);
+      if (okText) notify(okText);
+      if (payload && payload.op === 'load') load();
+    };
+    const paintModels = (list) => {
+      models.textContent = '';
+      if (!list.length) models.append(el('p', { class: 'small muted' }, 'Nessun modello salvato.'));
+      for (const m of list) {
+        const when = m.salvato ? new Date(m.salvato).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '';
+        models.append(el('div', { class: 'model' },
+          el('div', { class: 'who' }, el('b', {}, m.nome),
+            el('span', { class: 'small muted' }, (m.mode === 'credenziali' ? 'credenziali' : 'libero accesso') + ' · ' + m.canali + ' canali' + (m.utenti ? ' · ' + m.utenti + ' utenti' : '') + (when ? ' · ' + when : ''))),
+          el('button', { class: 'mini primary', onclick: () => { if (confirm('Caricare il modello "' + m.nome + '"? La configurazione attuale verrà sostituita.')) callModels({ op: 'load', file: m.file }, 'Modello "' + m.nome + '" caricato'); } }, 'Carica'),
+          el('button', { class: 'mini danger', onclick: () => { if (confirm('Eliminare il modello "' + m.nome + '"?')) callModels({ op: 'delete', file: m.file }, 'Modello eliminato'); } }, 'Elimina')));
+      }
+    };
+    body.append(el('div', { class: 'row' }, modelName,
+      el('button', { class: 'mini primary', onclick: () => callModels({ op: 'save', nome: modelName.value }, 'Modello salvato') }, '💾 Salva come modello')), models);
+    callModels();
+
     // Import / export della configurazione
-    body.append(el('h2', {}, 'Salva o carica la configurazione'));
+    body.append(el('h2', {}, 'Salva o carica da file'));
     const file = el('input', { type: 'file', accept: '.json,application/json', class: 'hidden' });
     file.addEventListener('change', async () => {
       const f = file.files[0];

@@ -400,6 +400,7 @@ type ExportFile struct {
 	Tipo      string `json:"tipo"`
 	Versione  int    `json:"versione"`
 	Esportato string `json:"esportato"`
+	Nome      string `json:"nome,omitempty"` // nome del modello (se salvato come modello)
 	Evento    *Event `json:"evento"`
 }
 

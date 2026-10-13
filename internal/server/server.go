@@ -41,6 +41,8 @@ type Config struct {
 	ChangeIP func(ip string) (host string, err error)
 	// DetectIPs rileva di nuovo le schede di rete (può essere nil).
 	DetectIPs func() []netinfo.Address
+	// ModelsDir è la cartella dei modelli di evento (vuota = funzione non disponibile).
+	ModelsDir string
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
@@ -109,6 +111,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("POST /api/regia/importa", s.onlyRegia(s.handleImport))
 	mux.HandleFunc("GET /api/regia/registro", s.onlyRegia(s.handleLog))
 	mux.HandleFunc("GET /api/regia/rete", s.onlyRegia(s.handleNetGet))
+	mux.HandleFunc("GET /api/regia/modelli", s.onlyRegia(s.handleModels))
+	mux.HandleFunc("POST /api/regia/modelli", s.onlyRegia(s.handleModelOp))
 	mux.HandleFunc("POST /api/regia/rete", s.onlyRegia(s.handleNetSet))
 	mux.HandleFunc("POST /api/regia/spegni", s.onlyRegia(s.handleShutdown))
 	mux.HandleFunc("GET /regia", s.page("regia.html"))

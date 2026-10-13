@@ -191,6 +191,7 @@ func main() {
 		Log:       reg.Lines,
 		Shutdown:  func() { quitOnce.Do(func() { close(quit) }) },
 		DetectIPs: netinfo.Detect,
+		ModelsDir: filepath.Join(*dataDir, "modelli"),
 		ChangeIP: func(ip string) (string, error) {
 			newHost := ip
 			if certMode == "dominio" {

@@ -2,7 +2,7 @@
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
-> **Stato: Fase 3**: canali e logica intercom, ruoli e permessi, libero accesso o accesso con credenziali, configurazione dalla console, riduzione rumore forte.
+> **Stato: Fase 4**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), avatar, riduzione rumore forte. Prossima: video dalla regia.
 
 ## Come funziona
 
@@ -56,10 +56,11 @@ I file non sono firmati da Apple, quindi va fatto un passaggio in più:
 ## Console di regia
 
 Si apre da sola all'avvio (`https://localhost:8443/regia`) ed è pensata per stare in uno schermo 16:9:
-- **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, anteprime video (dalla Fase 5);
+- **a sinistra**: QR per i tecnici, QR di aiuto per il certificato, **rete usata nei QR** (se il PC ha più schede di rete, si sceglie qui; la scelta viene ricordata), anteprime video (dalla Fase 5);
 - **in alto a destra, Configurazione**, con le schede:
-  - *Evento*: nome, modalità di accesso, **Esporta / Importa configurazione** (un file `.json` da tenere come modello o preparare prima dell'evento), **Spegni il programma**;
+  - *Evento*: nome, modalità di accesso, **modelli di evento** (salva la configurazione con un nome, ricaricala con un clic), **Esporta / Importa** su file `.json` (per prepararla su un altro computer), **Spegni il programma**;
   - *Canali*, *Utenti*, *Video*;
+  - *QR*: QR generale, **QR per canale** (libero accesso: l'app propone già quel canale) o **QR personale per utente** (credenziali: si entra senza password), ognuno scaricabile in PNG; **Stampa / salva PDF** apre un foglio A4 con le schede da ritagliare;
   - *Registro*: i messaggi del programma, salvati anche in `intercom.log` nella cartella dati;
 - **in basso a destra, Intercom**: tasti PARLA per canale, PARLA A TUTTI, lista dei collegati.
 
@@ -78,6 +79,7 @@ Si sceglie nella **console di regia**, sezione *Configurazione evento*. La confi
 ### Accesso con credenziali
 - La regia crea gli **utenti** (nome utente, nome mostrato, password), con ruolo **Tecnico** o **Caporeparto** e i canali assegnati.
 - Il telefono mostra il **login**. Ruolo e canali li decide la regia.
+- In alternativa ognuno può inquadrare il proprio **QR personale** (scheda QR della console): compare "Ciao Marco" e basta premere Entra. Il QR contiene una chiave di accesso, non la password. Se un QR va perso, **Nuovo codice** lo rende inutilizzabile.
 - Le modifiche valgono subito anche per chi è già collegato: un canale aggiunto compare sul telefono, un utente eliminato viene scollegato.
 - Cambiando modalità tutti i collegati vengono scollegati e devono rientrare.
 
@@ -120,7 +122,7 @@ Si passano da riga di comando, per esempio `intercom.exe -ip 192.168.1.10`:
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
 
-Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`) e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
+Cartella dati predefinita: `%AppData%\IntercomRegia` su Windows e `~/Library/Application Support/IntercomRegia` su Mac. Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), la cartella `modelli` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
 ### Certificato di dominio (nessun avviso sui telefoni)
 Se hai un certificato valido per un dominio (es. wildcard `*.intercom.tuodominio.it`) e un DNS che risolve `192-168-1-10.intercom.tuodominio.it` su `192.168.1.10`:
