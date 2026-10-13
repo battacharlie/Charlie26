@@ -294,6 +294,10 @@ type clientMsg struct {
 	Video       bool                     `json:"video"`
 	Avatar      string                   `json:"avatar"`
 	Image       string                   `json:"image"`
+	Stream      string                   `json:"stream"`
+	Ref         string                   `json:"ref"`
+	Label       string                   `json:"label"`
+	Quality     string                   `json:"quality"`
 	SDP         string                   `json:"sdp"`
 	Candidate   *webrtc.ICECandidateInit `json:"candidate"`
 	On          bool                     `json:"on"`
@@ -412,6 +416,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "listen":
 			if peer != nil {
 				peer.SetListen(m.Channel, m.On)
+			}
+		case "videoStart":
+			if peer != nil {
+				info, err := peer.StartVideo(m.Ref, strings.TrimSpace(m.Label), m.Channels)
+				if err != nil {
+					send(sfu.Message{Type: "videoError", Ref: m.Ref, Error: err.Error()})
+				} else {
+					send(sfu.Message{Type: "videoStarted", Ref: m.Ref, Stream: info.ID, Videos: []sfu.VideoInfo{*info}})
+				}
+			}
+		case "videoStop", "videoApprove":
+			if peer != nil {
+				var err error
+				if m.Type == "videoStop" {
+					err = peer.StopVideo(m.Stream)
+				} else {
+					err = peer.ApproveVideo(m.Stream, m.On)
+				}
+				if err != nil {
+					send(sfu.Message{Type: "error", Error: err.Error()})
+				}
+			}
+		case "videoQuality":
+			if peer != nil {
+				peer.SetVideoQuality(m.Stream, m.Quality)
 			}
 		case "avatar":
 			if peer != nil {

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -72,6 +74,8 @@ type fakePhone struct {
 	welcome chan string
 	token   string           // gettone da caporeparto ricevuto all'ingresso (libero accesso)
 	msgs    chan sfu.Message // altri messaggi dal server (mute, kicked, me…)
+	videos  []sfu.VideoInfo
+	vsend   *fakeVideo // video che questo telefono vuole inviare
 }
 
 // login ottiene un gettone di sessione (modalità credenziali).
@@ -119,8 +123,22 @@ func newFakePhone(t *testing.T, ts *httptest.Server, name string, join map[strin
 		}
 	})
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		ctr := f.counter(tr.StreamID())
 		buf := make([]byte, 1500)
+		if tr.Kind() == webrtc.RTPCodecTypeVideo {
+			// Video: conto i pacchetti per corsia, riconoscibile dal segno
+			// 'H' o 'L' che il telefono finto mette nei fotogrammi.
+			pkt := &rtp.Packet{}
+			for {
+				n, _, err := tr.Read(buf)
+				if err != nil {
+					return
+				}
+				if pkt.Unmarshal(buf[:n]) == nil && len(pkt.Payload) > 1 && pkt.Payload[0]&0x1F == 1 {
+					f.counter(tr.StreamID() + "/" + string(pkt.Payload[1])).Add(1)
+				}
+			}
+		}
+		ctr := f.counter(tr.StreamID())
 		for {
 			if _, _, err := tr.Read(buf); err != nil {
 				return
@@ -177,8 +195,12 @@ func (f *fakePhone) loop() {
 		case "error":
 			f.t.Logf("%s: errore dal server: %s", f.name, m.Error)
 			f.msgs <- m
-		case "mute", "kicked", "me", "ownerToken", "ownerRevoked":
+		case "mute", "kicked", "me", "ownerToken", "ownerRevoked", "videoStarted", "videoError", "videoDenied":
 			f.msgs <- m
+		case "videos":
+			f.mu.Lock()
+			f.videos = m.Videos
+			f.mu.Unlock()
 		case "offer":
 			if f.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 				return
@@ -187,6 +209,7 @@ func (f *fakePhone) loop() {
 				f.t.Logf("SetRemoteDescription: %v", err)
 				return
 			}
+			f.attachVideo(m.Video)
 			ans, err := f.pc.CreateAnswer(nil)
 			if err != nil {
 				f.t.Logf("CreateAnswer: %v", err)
@@ -199,6 +222,151 @@ func (f *fakePhone) loop() {
 			f.write(map[string]any{"type": "answer", "sdp": ans.SDP})
 		}
 	}
+}
+
+// fakeVideo è un video finto in due corsie: ogni fotogramma porta il segno
+// 'H' (alta) o 'L' (bassa); un keyframe ogni secondo o quando viene chiesto.
+type fakeVideo struct {
+	ref      string
+	tracks   map[string]*webrtc.TrackLocalStaticSample
+	attached bool
+	keyframe map[string]*atomic.Bool
+	stop     chan struct{}
+}
+
+func (f *fakePhone) startVideo(label string, channels ...string) {
+	v := &fakeVideo{ref: "r" + label, tracks: map[string]*webrtc.TrackLocalStaticSample{}, keyframe: map[string]*atomic.Bool{}, stop: make(chan struct{})}
+	for _, l := range []string{"H", "L"} {
+		tr, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"}, "cam-"+l, "cam")
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		v.tracks[l] = tr
+		v.keyframe[l] = &atomic.Bool{}
+		v.keyframe[l].Store(true)
+	}
+	f.mu.Lock()
+	f.vsend = v
+	f.mu.Unlock()
+	f.write(map[string]any{"type": "videoStart", "ref": v.ref, "label": label, "channels": channels})
+}
+
+// attachVideo: all'offerta con le linee video assegnate, aggancia le tracce.
+func (f *fakePhone) attachVideo(slots []sfu.VideoSlot) {
+	f.mu.Lock()
+	v := f.vsend
+	f.mu.Unlock()
+	if v == nil || v.attached {
+		return
+	}
+	for _, sl := range slots {
+		if sl.Ref == v.ref {
+			v.attached = true
+		}
+	}
+	if !v.attached {
+		return
+	}
+	// Come il browser: ogni corsia va sulla linea (mid) indicata dal server.
+	for _, sl := range slots {
+		if sl.Ref != v.ref {
+			continue
+		}
+		l := map[string]string{"h": "H", "l": "L"}[sl.Layer]
+		var tr *webrtc.RTPTransceiver
+		for _, t := range f.pc.GetTransceivers() {
+			if t.Mid() == sl.Mid {
+				tr = t
+			}
+		}
+		if tr == nil {
+			f.t.Logf("linea video %s non trovata", sl.Mid)
+			return
+		}
+		// Il mittente va creato dalla connessione (che conosce i codec concordati):
+		// lo creo con una linea d'appoggio e lo sposto su quella indicata.
+		tmp, err := f.pc.AddTransceiverFromTrack(v.tracks[l], webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+		if err != nil {
+			f.t.Logf("AddTransceiverFromTrack: %v", err)
+			return
+		}
+		sender := tmp.Sender()
+		if err := tr.SetSender(sender, v.tracks[l]); err != nil {
+			f.t.Logf("SetSender: %v", err)
+			return
+		}
+		kf := v.keyframe[l]
+		go func() { // il server chiede un keyframe: lo mando subito
+			for {
+				pkts, _, err := sender.ReadRTCP()
+				if err != nil {
+					return
+				}
+				for _, p := range pkts {
+					if _, ok := p.(*rtcp.PictureLossIndication); ok {
+						kf.Store(true)
+					}
+				}
+			}
+		}()
+	}
+	go func() {
+		t := time.NewTicker(33 * time.Millisecond)
+		defer t.Stop()
+		for i := 0; ; i++ {
+			select {
+			case <-v.stop:
+				return
+			case <-t.C:
+			}
+			if f.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+				return
+			}
+			for l, tr := range v.tracks {
+				var frame []byte
+				if v.keyframe[l].Swap(false) || i%30 == 0 {
+					frame = []byte{0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x1f, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 0, 1, 0x65, l[0], 1, 2, 3}
+				} else {
+					frame = []byte{0, 0, 0, 1, 0x41, l[0], 9, 9, 9}
+				}
+				_ = tr.WriteSample(media.Sample{Data: frame, Duration: 33 * time.Millisecond})
+			}
+		}
+	}()
+}
+
+// videoFrom: pacchetti video ricevuti per flusso e corsia in una finestra di tempo.
+func videoFrom(f *fakePhone, window time.Duration) map[string]int64 {
+	before := snapshot(f)
+	time.Sleep(window)
+	after := snapshot(f)
+	out := map[string]int64{}
+	for k, v := range after {
+		if strings.HasPrefix(k, "v:") && v-before[k] > 5 {
+			out[k] = v - before[k]
+		}
+	}
+	return out
+}
+
+// expectVideo attende che il telefono riceva esattamente queste corsie
+// (es. "v:v1/L"); senza argomenti = nessun video.
+func expectVideo(t *testing.T, f *fakePhone, want ...string) {
+	t.Helper()
+	var got map[string]int64
+	for i := 0; i < 15; i++ {
+		got = videoFrom(f, 500*time.Millisecond)
+		ok := len(got) == len(want)
+		for _, w := range want {
+			if _, has := got[w]; !has {
+				ok = false
+			}
+		}
+		if ok {
+			return
+		}
+	}
+	t.Fatalf("%s: video ricevuto %v, atteso %v", f.name, got, want)
 }
 
 // speak manda pacchetti Opus da 20 ms (contenuto finto: al server non importa).
@@ -831,4 +999,77 @@ func TestModels(t *testing.T) {
 	if code, list := call(`{"op":"delete","file":"concerto-piazza.json"}`); code != 200 || len(list) != 0 {
 		t.Fatalf("eliminazione: %d %v", code, list)
 	}
+}
+
+// Video: permessi, consenso, qualità, stop.
+func TestVideo(t *testing.T) {
+	ts, room := startServer(t, credentialsEvent(t))
+	user := func(u string) map[string]any { return map[string]any{"session": login(t, ts, u, "pass-"+u)} }
+	regia := newFakePhone(t, ts, "Regia", map[string]any{"regia": true})
+	capo := newFakePhone(t, ts, "CapoVideo", user("capovideo"))
+	cam1 := newFakePhone(t, ts, "Cam1", user("cam1"))
+	cam2 := newFakePhone(t, ts, "Cam2", user("cam2"))
+	fon := newFakePhone(t, ts, "Fonico", user("fonico"))
+
+	// Il caporeparto manda un video nel suo canale: parte subito.
+	capo.startVideo("Palco", "video")
+	started := expectMsg(t, capo, "videoStarted")
+	v1 := "v:" + started.Stream
+	if !started.Videos[0].Approved {
+		t.Fatal("il video del caporeparto nel suo canale deve partire senza consenso")
+	}
+	// Qualità predefinita: bassa. Il fonico (altro reparto) non riceve nulla.
+	expectVideo(t, cam1, v1+"/L")
+	expectVideo(t, cam2, v1+"/L")
+	expectVideo(t, regia, v1+"/L")
+	expectVideo(t, fon)
+	// Cam1 sceglie la qualità alta: passa alla corsia H.
+	cam1.write(map[string]any{"type": "videoQuality", "quality": "h"})
+	expectVideo(t, cam1, v1+"/H")
+	expectVideo(t, cam2, v1+"/L")
+	// Video spento: niente pacchetti.
+	cam2.write(map[string]any{"type": "videoQuality", "quality": "off"})
+	expectVideo(t, cam2)
+	cam2.write(map[string]any{"type": "videoQuality", "quality": "l"})
+	expectVideo(t, cam2, v1+"/L")
+
+	// Un tecnico chiede di mostrare un video: in attesa di consenso.
+	cam1.startVideo("Cablaggio", "video")
+	req := expectMsg(t, cam1, "videoStarted")
+	v2 := "v:" + req.Stream
+	if req.Videos[0].Approved {
+		t.Fatal("il video di un tecnico deve aspettare il consenso")
+	}
+	// Lo vedono solo chi deve decidere (caporeparto e regia), non gli altri tecnici.
+	expectVideo(t, capo, v2+"/L")
+	expectVideo(t, regia, v1+"/L", v2+"/L")
+	expectVideo(t, cam2, v1+"/L")
+	// Un tecnico non può approvare.
+	cam2.write(map[string]any{"type": "videoApprove", "stream": req.Stream, "on": true})
+	expectMsg(t, cam2, "error")
+	// Il caporeparto approva: ora lo vede anche Cam2.
+	capo.write(map[string]any{"type": "videoApprove", "stream": req.Stream, "on": true})
+	expectVideo(t, cam2, v1+"/L", v2+"/L")
+	expectVideo(t, fon)
+
+	// Il caporeparto ferma il video di Cam1.
+	capo.write(map[string]any{"type": "videoStop", "stream": req.Stream})
+	expectMsg(t, cam1, "videoDenied")
+	expectVideo(t, cam2, v1+"/L")
+
+	// Video della regia: arriva nel canale Video solo se il caporeparto lo permette.
+	regia.startVideo("Programma", "video", "audio")
+	pv := "v:" + expectMsg(t, regia, "videoStarted").Stream
+	expectVideo(t, fon) // canale Audio: video della regia non abilitato
+	expectVideo(t, cam2, v1+"/L")
+	capo.write(map[string]any{"type": "channelSettings", "channel": "video", "micMode": "libero", "video": true})
+	expectVideo(t, cam2, v1+"/L", pv+"/L")
+	expectVideo(t, fon)
+	if n := len(room.Videos()); n != 2 {
+		t.Fatalf("attesi 2 video attivi, trovati %d", n)
+	}
+
+	// Chi esce: i suoi video si fermano.
+	capo.ws.Close()
+	expectVideo(t, cam2, pv+"/L")
 }

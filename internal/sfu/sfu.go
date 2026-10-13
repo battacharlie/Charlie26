@@ -52,6 +52,10 @@ type Message struct {
 	Channel  string        `json:"channel,omitempty"`
 	Token    string        `json:"token,omitempty"`
 	Error    string        `json:"error,omitempty"`
+	Videos   []VideoInfo   `json:"videos,omitempty"`
+	Video    []VideoSlot   `json:"video,omitempty"`  // insieme all'offerta: linee video da usare per inviare
+	Stream   string        `json:"stream,omitempty"` // id di un flusso video
+	Ref      string        `json:"ref,omitempty"`
 }
 
 // PeerInfo descrive un partecipante nella lista mostrata ai client.
@@ -73,13 +77,15 @@ type Room struct {
 	api *webrtc.API
 	mux ice.UDPMux
 
-	mu       sync.Mutex
-	event    *evento.Event
-	save     func(*evento.Event) error
-	sessions map[string]string // gettone di sessione -> nome utente (modalità credenziali)
-	peers    map[string]*Peer
-	tracks   map[string]*forward // flussi in arrivo, per id
-	nextID   int
+	mu        sync.Mutex
+	event     *evento.Event
+	save      func(*evento.Event) error
+	sessions  map[string]string // gettone di sessione -> nome utente (modalità credenziali)
+	peers     map[string]*Peer
+	tracks    map[string]*forward // flussi audio in arrivo, per id
+	videos    map[string]*VideoStream
+	nextID    int
+	nextVideo int
 }
 
 // forward è un flusso in arrivo da un partecipante, con una copia
@@ -128,6 +134,10 @@ type Peer struct {
 	avatarMime string
 	avatarVer  int
 
+	vpairs    []*vpair          // linee con cui questo browser invia video
+	videoQ    string            // qualità video predefinita: "h", "l" o "off"
+	videoWant map[string]string // qualità scelta per singolo video
+
 	senders    map[string]*dest // id flusso -> copia verso questo peer
 	needsOffer bool             // serve una nuova negoziazione appena finisce quella in corso
 	closed     bool
@@ -142,8 +152,8 @@ func NewRoom(cfg Config) (*Room, error) {
 		return nil, err
 	}
 
-	me := &webrtc.MediaEngine{}
-	if err := me.RegisterDefaultCodecs(); err != nil {
+	me, err := mediaEngine()
+	if err != nil {
 		return nil, err
 	}
 	// Livello audio dentro ogni pacchetto: permette ai browser di mostrare
@@ -178,7 +188,32 @@ func NewRoom(cfg Config) (*Room, error) {
 		sessions: map[string]string{},
 		peers:    map[string]*Peer{},
 		tracks:   map[string]*forward{},
+		videos:   map[string]*VideoStream{},
 	}, nil
+}
+
+// mediaEngine: Opus per l'audio; per il video H.264 (lo decodificano in
+// hardware tutti i telefoni e lo manda OBS) e VP8 come riserva.
+func mediaEngine() (*webrtc.MediaEngine, error) {
+	me := &webrtc.MediaEngine{}
+	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"},
+		PayloadType:        111,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, err
+	}
+	fb := []webrtc.RTCPFeedback{{Type: "goog-remb"}, {Type: "ccm", Parameter: "fir"}, {Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "transport-cc"}}
+	for _, c := range []webrtc.RTPCodecParameters{
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", RTCPFeedback: fb}, PayloadType: 102},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: fb}, PayloadType: 104},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f", RTCPFeedback: fb}, PayloadType: 106},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: fb}, PayloadType: 96},
+	} {
+		if err := me.RegisterCodec(c, webrtc.RTPCodecTypeVideo); err != nil {
+			return nil, err
+		}
+	}
+	return me, nil
 }
 
 // Close libera la porta UDP.
@@ -225,25 +260,33 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 	r.mu.Lock()
 	r.nextID++
 	p := &Peer{
-		ID:      fmt.Sprintf("p%d", r.nextID),
-		Label:   fmt.Sprintf("p%d %s (%s)", r.nextID, res.name, res.role),
-		Name:    res.name,
-		Role:    res.role,
-		room:    r,
-		pc:      pc,
-		send:    send,
-		ident:   ident,
-		member:  res.member,
-		admin:   res.admin,
-		talk:    map[string]bool{},
-		forced:  map[string]bool{},
-		muted:   map[string]bool{},
-		senders: map[string]*dest{},
+		ID:        fmt.Sprintf("p%d", r.nextID),
+		Label:     fmt.Sprintf("p%d %s (%s)", r.nextID, res.name, res.role),
+		Name:      res.name,
+		Role:      res.role,
+		room:      r,
+		pc:        pc,
+		send:      send,
+		ident:     ident,
+		member:    res.member,
+		admin:     res.admin,
+		talk:      map[string]bool{},
+		forced:    map[string]bool{},
+		muted:     map[string]bool{},
+		senders:   map[string]*dest{},
+		videoQ:    layerLow,
+		videoWant: map[string]string{},
 	}
 	r.peers[p.ID] = p
 	r.mu.Unlock()
 
-	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) { r.forwardTrack(p, remote) })
+	pc.OnTrack(func(remote *webrtc.TrackRemote, recv *webrtc.RTPReceiver) {
+		if remote.Kind() == webrtc.RTPCodecTypeVideo {
+			r.forwardVideoLayer(p, remote, recv)
+		} else {
+			r.forwardTrack(p, remote)
+		}
+	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		log.Printf("[%s] connessione: %s", p.Label, s)
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
@@ -253,7 +296,7 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 
 	r.mu.Lock()
 	info := p.infoLocked()
-	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info}
+	welcome := Message{Type: "welcome", ID: p.ID, Channels: r.channelInfoLocked(), Mode: r.event.Mode, Me: &info, Videos: r.videoListLocked()}
 	if newOwner != nil {
 		welcome.Channel, welcome.Token = newOwner.channel, newOwner.token
 	}
@@ -390,6 +433,7 @@ func (r *Room) syncLocked() {
 		}
 	}
 	r.updateGatesLocked()
+	r.syncVideoLocked()
 	for _, p := range r.peers {
 		if p.needsOffer && !p.closed {
 			p.negotiateLocked()
@@ -449,7 +493,7 @@ func (p *Peer) negotiateLocked() {
 	case <-gathered:
 	case <-time.After(2 * time.Second):
 	}
-	p.send(Message{Type: "offer", SDP: p.pc.LocalDescription().SDP})
+	p.send(Message{Type: "offer", SDP: p.pc.LocalDescription().SDP, Video: p.videoSlotsLocked()})
 }
 
 // HandleAnswer applica la risposta SDP del browser.
@@ -521,7 +565,17 @@ func (p *Peer) Close() {
 	}
 	p.closed = true
 	delete(r.peers, p.ID)
+	ownVideos := false
+	for _, s := range r.videos {
+		if s.owner == p {
+			r.dropVideoLocked(s)
+			ownVideos = true
+		}
+	}
 	r.syncLocked() // toglie le sue copie dai flussi degli altri
+	if ownVideos {
+		r.broadcastVideosLocked()
+	}
 	r.mu.Unlock()
 
 	// Chiudere la connessione fa terminare forwardTrack, che rimuove i suoi flussi.
