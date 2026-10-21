@@ -48,14 +48,14 @@ jobs:
           go-version-file: go.mod
       - name: Test
         run: go test -race ./...
-      - name: Compila Windows e macOS
+      - name: Compila Windows, macOS e Linux
         run: |
           mkdir -p dist
           VERSION="${{ steps.ver.outputs.version }}"
           NUM="${{ steps.ver.outputs.num }}"
           # Icona e informazioni di versione dell'eseguibile Windows.
           go run ./tools/winres -version "$NUM"
-          for t in windows/amd64 darwin/arm64 darwin/amd64; do
+          for t in windows/amd64 darwin/arm64 darwin/amd64 linux/amd64; do
             os=${t%/*}; arch=${t#*/}; ext=""; gui=""
             # Windows: niente finestra nera, il programma vive come icona vicino all'orologio.
             [ "$os" = windows ] && ext=.exe && gui="-H=windowsgui"
@@ -120,6 +120,7 @@ jobs:
             | `charlie26-windows-amd64.exe` | Windows 10/11 |
             | `charlie26-darwin-arm64` | Mac con chip Apple (M1, M2, M3…) |
             | `charlie26-darwin-amd64` | Mac con processore Intel |
+            | `charlie26-linux-amd64` | Server Linux su internet (VPS), vedi [guida](https://github.com/${{ github.repository }}/blob/main/deploy/server/README.md) |
             | `charlie26-android.apk` | App per telefoni Android (tecnici e regia da smartphone) |
 
             **Windows**: doppio clic. Se compare "Windows ha protetto il PC": *Ulteriori informazioni → Esegui comunque*. Al primo avvio consenti l'accesso alle **Reti private**. Il programma resta come icona vicino all'orologio.

@@ -36,6 +36,11 @@ import (
 
 var version = "sviluppo"
 
+const (
+	passwordEnv    = "CHARLIE26_PASSWORD_REGIA" // password della regia in modalità server
+	minPasswordLen = 12
+)
+
 func main() {
 	var (
 		httpsPort = flag.Int("porta", 8443, "porta HTTPS (pagine e signaling)")
@@ -49,11 +54,34 @@ func main() {
 		mainName  = flag.String("principale", "Produzione", "nome del canale principale (solo per un evento nuovo)")
 		depts     = flag.String("canali", "Video,Audio,Luci", "reparti separati da virgola (solo per un evento nuovo)")
 		noBrowser = flag.Bool("no-browser", false, "non aprire automaticamente la console nel browser")
+
+		serverMode = flag.Bool("server", false, "modalità server per un VPS su internet (serve -host-pubblico, un certificato valido e la variabile "+passwordEnv+")")
+		publicHost = flag.String("host-pubblico", "", "nome pubblico del server, es. intercom.esempio.it (solo con -server): finisce nei QR code")
+		publicIP   = flag.String("ip-pubblico", "", "IP pubblico da annunciare a WebRTC se il server sta dietro un NAT (solo con -server; di solito non serve)")
 	)
 	flag.Parse()
 
+	// Modalità server: nessun browser, nessuna pagina di aiuto in HTTP, regia con password.
+	adminPass := ""
+	if *serverMode {
+		adminPass = os.Getenv(passwordEnv)
+		switch {
+		case *publicHost == "":
+			fatal("con -server serve anche -host-pubblico (il nome del server, es. intercom.esempio.it)")
+		case net.ParseIP(*publicHost) != nil:
+			fatal("-host-pubblico deve essere un nome di dominio, non un IP: il certificato è per il nome")
+		case len(adminPass) < minPasswordLen:
+			fatal("con -server imposta la variabile d'ambiente %s con una password di almeno %d caratteri (è quella con cui la regia entra da internet)", passwordEnv, minPasswordLen)
+		}
+		*noBrowser = true
+		*httpPort = 0
+	}
+	if *publicIP != "" && net.ParseIP(*publicIP) == nil {
+		fatal("-ip-pubblico non è un indirizzo IP valido: %q", *publicIP)
+	}
+
 	// Doppio clic con il programma già acceso: si apre la sua console e basta.
-	if alreadyRunning(*httpsPort) {
+	if !*serverMode && alreadyRunning(*httpsPort) {
 		return
 	}
 
@@ -112,6 +140,9 @@ func main() {
 			customCert, customKey = c, k
 		}
 	}
+	if *serverMode && customCert == "" {
+		fatal("con -server serve il certificato del dominio: indica -cert e -key (o mettili in %s come dominio.crt e dominio.key)", certDir)
+	}
 	if customCert != "" {
 		pair, err := certs.LoadCustom(customCert, customKey)
 		if err != nil {
@@ -119,10 +150,15 @@ func main() {
 		}
 		certMode = "dominio"
 		tlsCert = pair
-		if *domain != "" {
+		if *serverMode {
+			host = *publicHost
+		} else if *domain != "" {
 			host = domainHost(host, *domain)
 		}
 		if err := pair.Leaf.VerifyHostname(host); err != nil {
+			if *serverMode {
+				fatal("il certificato non copre %q: i telefoni vedrebbero un avviso di sicurezza (%v)", host, err)
+			}
 			say("  ⚠ Il certificato di dominio non copre %q: i telefoni vedranno un avviso.\n", host)
 		}
 		say("  HTTPS: certificato di dominio (%s)\n", filepath.Base(customCert))
@@ -163,12 +199,13 @@ func main() {
 		}
 	}
 	room, err := sfu.NewRoom(sfu.Config{
-		UDPPort: *udpPort,
-		Event:   ev,
-		Save:    func(e *evento.Event) error { return e.Save(eventPath) },
+		UDPPort:  *udpPort,
+		PublicIP: *publicIP,
+		Event:    ev,
+		Save:     func(e *evento.Event) error { return e.Save(eventPath) },
 	})
 	if err != nil {
-		if alreadyRunning(*httpsPort) {
+		if !*serverMode && alreadyRunning(*httpsPort) {
 			return
 		}
 		fatal("%v\nUn altro programma usa già la porta. Prova con l'opzione -porta-udp 8500.", err)
@@ -179,54 +216,65 @@ func main() {
 	var quitOnce sync.Once
 	var currentCert atomic.Pointer[tls.Certificate] // sostituibile se cambia la rete
 	currentCert.Store(&tlsCert)
+	if certMode == "dominio" {
+		// Let's Encrypt rinnova il certificato ogni ~60 giorni: lo si ricarica da solo.
+		go watchCert(customCert, customKey, &currentCert)
+	}
+
+	changeIP := func(ip string) (string, error) {
+		newHost := ip
+		if certMode == "dominio" {
+			if *domain != "" {
+				newHost = domainHost(ip, *domain)
+			}
+		} else {
+			// Il certificato deve coprire anche il nuovo IP (stessa CA: i
+			// telefoni che l'hanno installata restano a posto).
+			hosts := []string{ip}
+			for _, a := range netinfo.Detect() {
+				hosts = append(hosts, a.IP)
+			}
+			local, err := certs.EnsureLocal(certDir, hosts)
+			if err != nil {
+				return "", err
+			}
+			currentCert.Store(&local.Server)
+		}
+		settings.IP = ip
+		if err := saveSettings(settingsPath, settings); err != nil {
+			log.Printf("impossibile salvare le impostazioni: %v", err)
+		}
+		log.Printf("rete cambiata dalla console: i QR ora puntano a %s", newHost)
+		return newHost, nil
+	}
+	if *serverMode {
+		changeIP = nil // il nome del server è fisso: non si cambia dalla console
+	}
 
 	srv := server.New(server.Config{
-		Host:       host,
-		HTTPSPort:  *httpsPort,
-		HTTPPort:   *httpPort,
-		CertMode:   certMode,
-		CAPEM:      caPEM,
-		Web:        web.FS,
-		Room:       room,
-		IPs:        ips,
-		Log:        reg.Lines,
-		Shutdown:   func() { quitOnce.Do(func() { close(quit) }) },
-		DetectIPs:  netinfo.Detect,
-		ModelsDir:  filepath.Join(*dataDir, "modelli"),
-		RemoteFile: filepath.Join(*dataDir, "regia-remota.json"),
-		Images:     immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
-		Version:    version,
-		ChangeIP: func(ip string) (string, error) {
-			newHost := ip
-			if certMode == "dominio" {
-				if *domain != "" {
-					newHost = domainHost(ip, *domain)
-				}
-			} else {
-				// Il certificato deve coprire anche il nuovo IP (stessa CA: i
-				// telefoni che l'hanno installata restano a posto).
-				hosts := []string{ip}
-				for _, a := range netinfo.Detect() {
-					hosts = append(hosts, a.IP)
-				}
-				local, err := certs.EnsureLocal(certDir, hosts)
-				if err != nil {
-					return "", err
-				}
-				currentCert.Store(&local.Server)
-			}
-			settings.IP = ip
-			if err := saveSettings(settingsPath, settings); err != nil {
-				log.Printf("impossibile salvare le impostazioni: %v", err)
-			}
-			log.Printf("rete cambiata dalla console: i QR ora puntano a %s", newHost)
-			return newHost, nil
-		},
+		Public:        *serverMode,
+		AdminPassword: adminPass,
+		Host:          host,
+		HTTPSPort:     *httpsPort,
+		HTTPPort:      *httpPort,
+		CertMode:      certMode,
+		CAPEM:         caPEM,
+		Web:           web.FS,
+		Room:          room,
+		IPs:           ips,
+		Log:           reg.Lines,
+		Shutdown:      func() { quitOnce.Do(func() { close(quit) }) },
+		DetectIPs:     netinfo.Detect,
+		ModelsDir:     filepath.Join(*dataDir, "modelli"),
+		RemoteFile:    filepath.Join(*dataDir, "regia-remota.json"),
+		Images:        immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
+		Version:       version,
+		ChangeIP:      changeIP,
 	})
 
 	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
 	if err != nil {
-		if alreadyRunning(*httpsPort) {
+		if !*serverMode && alreadyRunning(*httpsPort) {
 			return
 		}
 		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
@@ -267,8 +315,12 @@ func main() {
 	}
 	mode := map[string]string{evento.ModeLibero: "libero accesso", evento.ModeCredenziali: "accesso con credenziali"}[ev.Mode]
 	say("  Evento %q, %s. Canali: %s\n\n", ev.Name, mode, strings.Join(names, ", "))
-	say("  Se Windows chiede di consentire l'accesso alla rete, scegli\n  \"Reti private\" e premi Consenti.\n")
-	say("%s\n\n", desktopHint)
+	if *serverMode {
+		say("  Modalità server: la regia entra dalla console con la password (%s).\n\n", passwordEnv)
+	} else {
+		say("  Se Windows chiede di consentire l'accesso alla rete, scegli\n  \"Reti private\" e premi Consenti.\n")
+		say("%s\n\n", desktopHint)
+	}
 
 	if !*noBrowser {
 		openBrowser(srv.ConsoleURL())
@@ -277,6 +329,34 @@ func main() {
 	runDesktop(desktop{consoleURL: srv.ConsoleURL(), appURL: srv.AppURL(), dataDir: *dataDir, quit: quit})
 	say("\n  Spegnimento…\n")
 	_ = hs.Close()
+}
+
+// watchCert ricarica il certificato quando i file cambiano (rinnovo Let's Encrypt).
+func watchCert(certPath, keyPath string, cur *atomic.Pointer[tls.Certificate]) {
+	mtime := func() time.Time {
+		var t time.Time
+		for _, p := range []string{certPath, keyPath} {
+			if st, err := os.Stat(p); err == nil && st.ModTime().After(t) {
+				t = st.ModTime()
+			}
+		}
+		return t
+	}
+	last := mtime()
+	for range time.Tick(30 * time.Minute) {
+		now := mtime()
+		if !now.After(last) {
+			continue
+		}
+		pair, err := certs.LoadCustom(certPath, keyPath)
+		if err != nil {
+			log.Printf("certificato rinnovato ma non leggibile (resta quello vecchio): %v", err)
+			continue
+		}
+		cur.Store(&pair)
+		last = now
+		log.Printf("certificato HTTPS ricaricato (scade il %s)", pair.Leaf.NotAfter.Format("02/01/2006"))
+	}
 }
 
 // domainHost: 192.168.1.10 + intercom.esempio.it -> 192-168-1-10.intercom.esempio.it

@@ -34,6 +34,10 @@ type Config struct {
 	// UDPPort è l'unica porta UDP usata da tutti i flussi audio/video.
 	// Una porta sola semplifica molto il firewall di Windows.
 	UDPPort int
+	// PublicIP è l'IP pubblico da annunciare ai telefoni quando il computer
+	// sta dietro un NAT (VPS con IP "mappato"). Vuoto = si usano gli IP delle
+	// schede di rete, che va bene in rete locale e sui VPS con IP diretto.
+	PublicIP string
 	// Event è la configurazione iniziale (canali, utenti, modalità).
 	Event *evento.Event
 	// Save viene chiamata a ogni modifica dell'evento (può essere nil).
@@ -180,6 +184,10 @@ func NewRoom(cfg Config) (*Room, error) {
 	}
 	se.SetICEUDPMux(mux)
 	se.SetIncludeLoopbackCandidate(true)
+	if cfg.PublicIP != "" {
+		// Modalità server dietro NAT: i telefoni devono ricevere l'IP pubblico.
+		se.SetNAT1To1IPs([]string{cfg.PublicIP}, webrtc.ICECandidateTypeHost)
+	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithInterceptorRegistry(ir), webrtc.WithSettingEngine(se))
 	return &Room{

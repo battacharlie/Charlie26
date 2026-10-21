@@ -50,11 +50,19 @@ type Config struct {
 	Version string
 	// RemoteFile è il file dei telefoni abbinati come regia (vuoto = solo in memoria).
 	RemoteFile string
+	// Public attiva la modalità server (VPS su internet): nessuno è "la
+	// macchina di regia" solo perché arriva da localhost, e la console si
+	// apre all'indirizzo pubblico.
+	Public bool
+	// AdminPassword è la password con cui la regia entra in modalità server
+	// (vuota = accesso con password disattivato).
+	AdminPassword string
 }
 
 // Server raggruppa le due porte (HTTPS e HTTP di aiuto).
 type Server struct {
 	cfg      Config
+	logins   *loginLimiter
 	upgrader websocket.Upgrader
 	remote   *remoteStore
 
@@ -67,7 +75,7 @@ type Server struct {
 
 // New crea il server.
 func New(cfg Config) *Server {
-	return &Server{cfg: cfg, host: cfg.Host, remote: newRemoteStore(cfg.RemoteFile)}
+	return &Server{cfg: cfg, host: cfg.Host, remote: newRemoteStore(cfg.RemoteFile), logins: newLoginLimiter()}
 }
 
 // Host restituisce l'IP o il nome usato nei QR.
@@ -95,6 +103,9 @@ func (s *Server) HelpURL() string {
 
 // ConsoleURL è l'indirizzo della console sulla macchina di regia.
 func (s *Server) ConsoleURL() string {
+	if s.cfg.Public {
+		return s.AppURL() + "regia"
+	}
 	return fmt.Sprintf("https://localhost%s/regia", portSuffix(s.cfg.HTTPSPort, 443))
 }
 
@@ -132,6 +143,8 @@ func (s *Server) HTTPSHandler() http.Handler {
 	mux.HandleFunc("GET /api/regia/dispositivi", s.onlyRegia(s.handleDevices))
 	mux.HandleFunc("POST /api/regia/dispositivi", s.onlyRegia(s.handleDevices))
 	mux.HandleFunc("POST /api/regia-remota/abbina", s.handlePair)
+	mux.HandleFunc("GET /api/regia-remota/stato", s.handleRegiaState)
+	mux.HandleFunc("POST /api/regia-remota/entra", s.handleRegiaLogin)
 	mux.HandleFunc("POST /api/regia-remota/esci", s.handleRemoteLogout)
 	mux.HandleFunc("GET /regia", s.page("regia.html"))
 	mux.HandleFunc("GET /regia/qr", s.onlyRegia(s.page("qr.html")))
@@ -417,7 +430,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			// La regia può entrare solo dalla macchina di regia o da un telefono abbinato.
-			if m.Regia && !isLoopback(r.RemoteAddr) {
+			if m.Regia && (s.cfg.Public || !isLoopback(r.RemoteAddr)) {
 				dev, ok := s.remoteDevice(r)
 				if !ok {
 					send(sfu.Message{Type: "error", Error: "il pannello di regia funziona solo sul computer di regia o su un telefono abbinato"})

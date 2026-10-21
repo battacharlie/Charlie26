@@ -216,6 +216,7 @@ Si passano da riga di comando, per esempio `charlie26.exe -ip 192.168.1.10`:
 | `-principale` | Produzione | nome del canale principale (solo per un evento nuovo) |
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
+| `-server`, `-host-pubblico`, `-ip-pubblico` | – | modalità server su internet (VPS), vedi [deploy/server](deploy/server/README.md) |
 
 Cartella dati predefinita: `%AppData%\Charlie26` su Windows e `~/Library/Application Support/Charlie26` su Mac (se trova la cartella `IntercomRegia` delle versioni precedenti, la riprende da sola). Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), le cartelle `modelli` e `immagini` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
