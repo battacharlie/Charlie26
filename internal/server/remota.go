@@ -212,7 +212,7 @@ func (s *Server) remoteDevice(r *http.Request) (RemoteDevice, bool) {
 
 // isRegia: macchina di regia oppure telefono abbinato.
 func (s *Server) isRegia(r *http.Request) bool {
-	if isLoopback(r.RemoteAddr) {
+	if !s.cfg.Public && isLoopback(r.RemoteAddr) {
 		return true
 	}
 	_, ok := s.remoteDevice(r)

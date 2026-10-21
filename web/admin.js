@@ -48,7 +48,7 @@
   function notPaired() {
     document.body.classList.add('unpaired');
     document.body.innerHTML = '';
-    document.body.append(el('div', { class: 'doc' },
+    const doc = el('div', { class: 'doc' },
       el('div', { class: 'brand big' }, el('img', { src: '/static/brand/icon-192.png', alt: '' }),
         el('div', {}, el('span', { class: 'word' }, 'CHARLIE', el('b', {}, '26')), el('span', { class: 'tag' }, 'INTERCOM EVOLUTO'))),
       el('h1', {}, 'Regia da smartphone'),
@@ -59,7 +59,39 @@
         el('li', {}, 'Il telefono diventa una seconda regia, con gli stessi comandi del computer.')),
       el('p', { class: 'muted small' }, 'Il codice vale 5 minuti e una sola volta. Dalla console puoi revocare l\'abbinamento quando vuoi.'),
       el('p', {}, el('a', { class: 'btn', href: '/' }, 'Entra invece come tecnico')),
-      window.charlieApp ? el('p', {}, el('button', { class: 'linkbtn', onclick: () => window.charlieApp.home() }, '↩ Torna alla scansione del QR')) : null));
+      window.charlieApp ? el('p', {}, el('button', { class: 'linkbtn', onclick: () => window.charlieApp.home() }, '↩ Torna alla scansione del QR')) : null);
+    document.body.append(doc);
+    // Server su internet: la regia può entrare anche con la password.
+    fetch('/api/regia-remota/stato').then((r) => r.json()).then((st) => {
+      if (st && st.password) doc.insertBefore(passwordLogin(), doc.querySelector('h1').nextSibling);
+    }).catch(() => {});
+  }
+
+  // Accesso alla regia con password (solo sui server pubblici).
+  function passwordLogin() {
+    const msg = el('p', { class: 'banner error hidden', role: 'alert' });
+    const pass = el('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Password della regia', 'aria-label': 'Password della regia' });
+    const btn = el('button', { class: 'btn', type: 'submit' }, 'Entra come regia');
+    const form = el('form', { class: 'card' },
+      el('h2', {}, 'Entra con la password'),
+      el('p', { class: 'muted small' }, 'È la password della regia impostata sul server.'),
+      pass, msg, btn);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      btn.disabled = true;
+      msg.classList.add('hidden');
+      try {
+        const r = await fetch('/api/regia-remota/entra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass.value, nome: 'Regia (browser)' }) });
+        const out = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(out.error || 'Accesso non riuscito');
+        location.replace('/regia');
+      } catch (e) {
+        msg.textContent = e.message;
+        msg.classList.remove('hidden');
+        btn.disabled = false;
+      }
+    });
+    return form;
   }
 
   // ---------- Telefoni abbinati come regia ----------
