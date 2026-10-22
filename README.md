@@ -249,4 +249,4 @@ go run ./tools/winres -version 1.0.0  # icona e versione per l'eseguibile Window
 
 ## Credits
 
-**CHARLIE26 – Intercom Evoluto** · Andrea Battaglioli – [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · ABit/s · Made in Bolognina
+**CHARLIE26 – Intercom Evoluto** · Andrea Battaglioli – [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · [MyWebTvLive.com](https://www.mywebtvlive.com) · Made in Bolognina
