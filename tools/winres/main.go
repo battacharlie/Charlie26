@@ -37,8 +37,8 @@ func main() {
 		version.ProductName:      "CHARLIE26 – Intercom Evoluto",
 		version.FileDescription:  "CHARLIE26 – Intercom Evoluto",
 		version.OriginalFilename: "charlie26.exe",
-		version.CompanyName:      "Andrea Battaglioli – ABit/s",
-		version.LegalCopyright:   "Andrea Battaglioli – www.andreabattaglioli.it – ABit/s – Made in Bolognina",
+		version.CompanyName:      "Andrea Battaglioli – MyWebTvLive.com",
+		version.LegalCopyright:   "Andrea Battaglioli – www.andreabattaglioli.it – MyWebTvLive.com – Made in Bolognina",
 	} {
 		_ = vi.Set(0x0410, k, val) // italiano
 	}

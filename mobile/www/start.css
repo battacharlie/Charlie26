@@ -32,3 +32,5 @@ h2 { font-size: 1rem; margin: 1.2rem 0 .5rem; color: var(--muted); font-weight: 
 .small { font-size: .8rem; }
 .credits { text-align: center; font-size: .68rem; margin-top: 1rem; opacity: .75; }
 .credits a { color: var(--muted); text-decoration: none; }
+.mwtl { white-space: nowrap; }
+.mwtl img { width: 1.25em; height: 1.25em; vertical-align: -.3em; margin-right: .3em; border-radius: 50%; }

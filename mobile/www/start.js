@@ -134,6 +134,9 @@
   $('site').addEventListener('click', (e) => {
     if (native && native.openExternal) { e.preventDefault(); native.openExternal('https://www.andreabattaglioli.it'); }
   });
+  $('mwtl').addEventListener('click', (e) => {
+    if (native && native.openExternal) { e.preventDefault(); native.openExternal('https://www.mywebtvlive.com'); }
+  });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !stream) { scanning = true; $('scanner').classList.remove('found'); startCamera(); }
