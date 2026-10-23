@@ -47,7 +47,13 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test
-        run: go test -race ./...
+        run: |
+          # Se fallisce, l'errore compare come annotazione (i log grezzi non sono sempre raggiungibili).
+          go test -race ./... > test.log 2>&1 && { cat test.log; exit 0; }
+          cat test.log
+          MSG=$(grep -vE '^(ok|\?)' test.log | head -c 3500 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+          echo "::error title=go test::$MSG"
+          exit 1
       - name: Compila Windows, macOS e Linux
         run: |
           mkdir -p dist
