@@ -24,13 +24,13 @@ const (
 
 // Divisore smista le connessioni in arrivo su un unico listener.
 type Divisore struct {
-	ln      net.Listener
-	tls     *filtro
-	ice     *filtro
-	chiuso  chan struct{}
-	once    sync.Once
-	mu      sync.Mutex
-	errAcc  error
+	ln     net.Listener
+	tls    *filtro
+	ice    *filtro
+	chiuso chan struct{}
+	once   sync.Once
+	mu     sync.Mutex
+	errAcc error
 }
 
 type filtro struct {
