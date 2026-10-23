@@ -28,6 +28,7 @@ import (
 	"github.com/battacharlie/charlie26/internal/evento"
 	"github.com/battacharlie/charlie26/internal/immagini"
 	"github.com/battacharlie/charlie26/internal/netinfo"
+	"github.com/battacharlie/charlie26/internal/portacondivisa"
 	"github.com/battacharlie/charlie26/internal/registro"
 	"github.com/battacharlie/charlie26/internal/server"
 	"github.com/battacharlie/charlie26/internal/sfu"
@@ -198,11 +199,27 @@ func main() {
 			fatal("impossibile salvare l'evento in %s: %v", eventPath, err)
 		}
 	}
+	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
+	if err != nil {
+		if !*serverMode && alreadyRunning(*httpsPort) {
+			return
+		}
+		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
+	}
+	// In modalità server la porta 443/TCP serve anche da ripiego ICE-TCP per le
+	// reti che bloccano l'UDP (alberghi, aziende): HTTPS e ICE-TCP si distinguono
+	// dal primo byte della connessione.
+	var iceTCP net.Listener
+	if *serverMode {
+		div := portacondivisa.Nuovo(httpsLn)
+		httpsLn, iceTCP = div.TLS(), div.ICE()
+	}
 	room, err := sfu.NewRoom(sfu.Config{
-		UDPPort:  *udpPort,
-		PublicIP: *publicIP,
-		Event:    ev,
-		Save:     func(e *evento.Event) error { return e.Save(eventPath) },
+		UDPPort:     *udpPort,
+		PublicIP:    *publicIP,
+		TCPListener: iceTCP,
+		Event:       ev,
+		Save:        func(e *evento.Event) error { return e.Save(eventPath) },
 	})
 	if err != nil {
 		if !*serverMode && alreadyRunning(*httpsPort) {
@@ -272,13 +289,6 @@ func main() {
 		ChangeIP:      changeIP,
 	})
 
-	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
-	if err != nil {
-		if !*serverMode && alreadyRunning(*httpsPort) {
-			return
-		}
-		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
-	}
 	hs := &http.Server{
 		Handler: srv.HTTPSHandler(),
 		TLSConfig: &tls.Config{
@@ -309,6 +319,9 @@ func main() {
 		say("  Aiuto certificato: %s\n", srv.HelpURL())
 	}
 	say("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
+	if iceTCP != nil {
+		say("  Ripiego per reti senza UDP: ICE-TCP sulla porta %d\n", *httpsPort)
+	}
 	names := make([]string, len(ev.Channels))
 	for i, c := range ev.Channels {
 		names[i] = c.Name
