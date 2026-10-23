@@ -29,8 +29,8 @@ type Divisore struct {
 	ice     *filtro
 	chiuso  chan struct{}
 	once    sync.Once
+	mu      sync.Mutex
 	errAcc  error
-	errOnce sync.Once
 }
 
 type filtro struct {
@@ -57,7 +57,11 @@ func (d *Divisore) accetta() {
 	for {
 		c, err := d.ln.Accept()
 		if err != nil {
-			d.errOnce.Do(func() { d.errAcc = err })
+			d.mu.Lock()
+			if d.errAcc == nil {
+				d.errAcc = err
+			}
+			d.mu.Unlock()
 			d.chiudi()
 			return
 		}
@@ -100,8 +104,11 @@ func (f *filtro) Accept() (net.Conn, error) {
 	case c := <-f.ch:
 		return c, nil
 	case <-f.d.chiuso:
-		if f.d.errAcc != nil {
-			return nil, f.d.errAcc
+		f.d.mu.Lock()
+		err := f.d.errAcc
+		f.d.mu.Unlock()
+		if err != nil {
+			return nil, err
 		}
 		return nil, errors.New("listener chiuso")
 	}
