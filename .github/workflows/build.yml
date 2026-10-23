@@ -140,6 +140,7 @@ jobs:
 
             **Android**: apri `charlie26-android.apk` dal telefono e consenti "Installa app sconosciute" per il browser o per File.
 
-            CHARLIE26 – Intercom Evoluto · Andrea Battaglioli – [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · [MyWebTvLive.com](https://www.mywebtvlive.com) · Made in Bolognina
+            CHARLIE26 – Intercom Evoluto  
+            Ideato e sviluppato da [www.andreabattaglioli.it](https://www.andreabattaglioli.it) · [MyWebTvLive.com](https://www.mywebtvlive.com) · Made in Bolognina
 
             Istruzioni complete e guida per l'evento nel [README](https://github.com/${{ github.repository }}#readme).
