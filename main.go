@@ -97,7 +97,7 @@ func main() {
 	log.SetOutput(reg)
 	log.SetFlags(log.Ltime)
 
-	say("\n  CHARLIE26 – Intercom Evoluto %s\n  Andrea Battaglioli – www.andreabattaglioli.it · MyWebTvLive.com · Made in Bolognina\n  ─────────────────────────────\n", version)
+	say("\n  CHARLIE26 – Intercom Evoluto %s\n  Ideato e sviluppato da www.andreabattaglioli.it · MyWebTvLive.com · Made in Bolognina\n  ─────────────────────────────\n", version)
 
 	ips := netinfo.Detect()
 	settingsPath := filepath.Join(*dataDir, "impostazioni.json")
