@@ -28,7 +28,6 @@ import (
 	"github.com/battacharlie/charlie26/internal/evento"
 	"github.com/battacharlie/charlie26/internal/immagini"
 	"github.com/battacharlie/charlie26/internal/netinfo"
-	"github.com/battacharlie/charlie26/internal/portacondivisa"
 	"github.com/battacharlie/charlie26/internal/registro"
 	"github.com/battacharlie/charlie26/internal/server"
 	"github.com/battacharlie/charlie26/internal/sfu"
@@ -36,11 +35,6 @@ import (
 )
 
 var version = "sviluppo"
-
-const (
-	passwordEnv    = "CHARLIE26_PASSWORD_REGIA" // password della regia in modalità server
-	minPasswordLen = 12
-)
 
 func main() {
 	var (
@@ -55,34 +49,11 @@ func main() {
 		mainName  = flag.String("principale", "Produzione", "nome del canale principale (solo per un evento nuovo)")
 		depts     = flag.String("canali", "Video,Audio,Luci", "reparti separati da virgola (solo per un evento nuovo)")
 		noBrowser = flag.Bool("no-browser", false, "non aprire automaticamente la console nel browser")
-
-		serverMode = flag.Bool("server", false, "modalità server per un VPS su internet (serve -host-pubblico, un certificato valido e la variabile "+passwordEnv+")")
-		publicHost = flag.String("host-pubblico", "", "nome pubblico del server, es. intercom.esempio.it (solo con -server): finisce nei QR code")
-		publicIP   = flag.String("ip-pubblico", "", "IP pubblico da annunciare a WebRTC se il server sta dietro un NAT (solo con -server; di solito non serve)")
 	)
 	flag.Parse()
 
-	// Modalità server: nessun browser, nessuna pagina di aiuto in HTTP, regia con password.
-	adminPass := ""
-	if *serverMode {
-		adminPass = os.Getenv(passwordEnv)
-		switch {
-		case *publicHost == "":
-			fatal("con -server serve anche -host-pubblico (il nome del server, es. intercom.esempio.it)")
-		case net.ParseIP(*publicHost) != nil:
-			fatal("-host-pubblico deve essere un nome di dominio, non un IP: il certificato è per il nome")
-		case len(adminPass) < minPasswordLen:
-			fatal("con -server imposta la variabile d'ambiente %s con una password di almeno %d caratteri (è quella con cui la regia entra da internet)", passwordEnv, minPasswordLen)
-		}
-		*noBrowser = true
-		*httpPort = 0
-	}
-	if *publicIP != "" && net.ParseIP(*publicIP) == nil {
-		fatal("-ip-pubblico non è un indirizzo IP valido: %q", *publicIP)
-	}
-
 	// Doppio clic con il programma già acceso: si apre la sua console e basta.
-	if !*serverMode && alreadyRunning(*httpsPort) {
+	if alreadyRunning(*httpsPort) {
 		return
 	}
 
@@ -141,9 +112,6 @@ func main() {
 			customCert, customKey = c, k
 		}
 	}
-	if *serverMode && customCert == "" {
-		fatal("con -server serve il certificato del dominio: indica -cert e -key (o mettili in %s come dominio.crt e dominio.key)", certDir)
-	}
 	if customCert != "" {
 		pair, err := certs.LoadCustom(customCert, customKey)
 		if err != nil {
@@ -151,15 +119,10 @@ func main() {
 		}
 		certMode = "dominio"
 		tlsCert = pair
-		if *serverMode {
-			host = *publicHost
-		} else if *domain != "" {
+		if *domain != "" {
 			host = domainHost(host, *domain)
 		}
 		if err := pair.Leaf.VerifyHostname(host); err != nil {
-			if *serverMode {
-				fatal("il certificato non copre %q: i telefoni vedrebbero un avviso di sicurezza (%v)", host, err)
-			}
 			say("  ⚠ Il certificato di dominio non copre %q: i telefoni vedranno un avviso.\n", host)
 		}
 		say("  HTTPS: certificato di dominio (%s)\n", filepath.Base(customCert))
@@ -201,28 +164,18 @@ func main() {
 	}
 	httpsLn, err := net.Listen("tcp", ":"+strconv.Itoa(*httpsPort))
 	if err != nil {
-		if !*serverMode && alreadyRunning(*httpsPort) {
+		if alreadyRunning(*httpsPort) {
 			return
 		}
 		fatal("La porta HTTPS %d è occupata da un altro programma (%v).\nProva con l'opzione -porta 9443.", *httpsPort, err)
 	}
-	// In modalità server la porta 443/TCP serve anche da ripiego ICE-TCP per le
-	// reti che bloccano l'UDP (alberghi, aziende): HTTPS e ICE-TCP si distinguono
-	// dal primo byte della connessione.
-	var iceTCP net.Listener
-	if *serverMode {
-		div := portacondivisa.Nuovo(httpsLn)
-		httpsLn, iceTCP = div.TLS(), div.ICE()
-	}
 	room, err := sfu.NewRoom(sfu.Config{
-		UDPPort:     *udpPort,
-		PublicIP:    *publicIP,
-		TCPListener: iceTCP,
-		Event:       ev,
-		Save:        func(e *evento.Event) error { return e.Save(eventPath) },
+		UDPPort: *udpPort,
+		Event:   ev,
+		Save:    func(e *evento.Event) error { return e.Save(eventPath) },
 	})
 	if err != nil {
-		if !*serverMode && alreadyRunning(*httpsPort) {
+		if alreadyRunning(*httpsPort) {
 			return
 		}
 		fatal("%v\nUn altro programma usa già la porta. Prova con l'opzione -porta-udp 8500.", err)
@@ -264,29 +217,23 @@ func main() {
 		log.Printf("rete cambiata dalla console: i QR ora puntano a %s", newHost)
 		return newHost, nil
 	}
-	if *serverMode {
-		changeIP = nil // il nome del server è fisso: non si cambia dalla console
-	}
-
 	srv := server.New(server.Config{
-		Public:        *serverMode,
-		AdminPassword: adminPass,
-		Host:          host,
-		HTTPSPort:     *httpsPort,
-		HTTPPort:      *httpPort,
-		CertMode:      certMode,
-		CAPEM:         caPEM,
-		Web:           web.FS,
-		Room:          room,
-		IPs:           ips,
-		Log:           reg.Lines,
-		Shutdown:      func() { quitOnce.Do(func() { close(quit) }) },
-		DetectIPs:     netinfo.Detect,
-		ModelsDir:     filepath.Join(*dataDir, "modelli"),
-		RemoteFile:    filepath.Join(*dataDir, "regia-remota.json"),
-		Images:        immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
-		Version:       version,
-		ChangeIP:      changeIP,
+		Host:       host,
+		HTTPSPort:  *httpsPort,
+		HTTPPort:   *httpPort,
+		CertMode:   certMode,
+		CAPEM:      caPEM,
+		Web:        web.FS,
+		Room:       room,
+		IPs:        ips,
+		Log:        reg.Lines,
+		Shutdown:   func() { quitOnce.Do(func() { close(quit) }) },
+		DetectIPs:  netinfo.Detect,
+		ModelsDir:  filepath.Join(*dataDir, "modelli"),
+		RemoteFile: filepath.Join(*dataDir, "regia-remota.json"),
+		Images:     immagini.Store{Dir: filepath.Join(*dataDir, "immagini")},
+		Version:    version,
+		ChangeIP:   changeIP,
 	})
 
 	hs := &http.Server{
@@ -319,21 +266,14 @@ func main() {
 		say("  Aiuto certificato: %s\n", srv.HelpURL())
 	}
 	say("  Audio/video WebRTC sulla porta UDP %d\n", *udpPort)
-	if iceTCP != nil {
-		say("  Ripiego per reti senza UDP: ICE-TCP sulla porta %d\n", *httpsPort)
-	}
 	names := make([]string, len(ev.Channels))
 	for i, c := range ev.Channels {
 		names[i] = c.Name
 	}
 	mode := map[string]string{evento.ModeLibero: "libero accesso", evento.ModeCredenziali: "accesso con credenziali"}[ev.Mode]
 	say("  Evento %q, %s. Canali: %s\n\n", ev.Name, mode, strings.Join(names, ", "))
-	if *serverMode {
-		say("  Modalità server: la regia entra dalla console con la password (%s).\n\n", passwordEnv)
-	} else {
-		say("  Se Windows chiede di consentire l'accesso alla rete, scegli\n  \"Reti private\" e premi Consenti.\n")
-		say("%s\n\n", desktopHint)
-	}
+	say("  Se Windows chiede di consentire l'accesso alla rete, scegli\n  \"Reti private\" e premi Consenti.\n")
+	say("%s\n\n", desktopHint)
 
 	if !*noBrowser {
 		openBrowser(srv.ConsoleURL())

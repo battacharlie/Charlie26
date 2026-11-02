@@ -4,6 +4,8 @@
 
 Intercom per eventi che funziona dal browser dello smartphone. Si lancia un solo programma sul computer di regia, e i tecnici inquadrano un QR code. Non devono installare niente e non serve internet.
 
+> **Due edizioni.** Questa, gratuita, funziona **in rete locale** (Wi-Fi o cavo, anche senza internet). Esiste anche una **edizione con accesso da remoto** (VPS o cloud: HTTPS valido, regia con password, ripiego per le reti che bloccano l'UDP) che si può **provare per 7 giorni su richiesta**: modulo su [www.charlie26inter.com](https://www.charlie26inter.com/).
+
 > **Stato: Fase 7**: canali e logica intercom, ruoli e permessi, libero accesso o credenziali, console di regia completa (rete, QR stampabili, modelli di evento), **video** (dalla regia, da OBS e dai telefoni, con consenso e qualità selezionabile), avatar, riduzione rumore forte.
 
 ## Come funziona
@@ -216,7 +218,6 @@ Si passano da riga di comando, per esempio `charlie26.exe -ip 192.168.1.10`:
 | `-principale` | Produzione | nome del canale principale (solo per un evento nuovo) |
 | `-canali` | Video,Audio,Luci | reparti, separati da virgola (solo per un evento nuovo) |
 | `-cert`, `-key`, `-dominio` | – | certificato di un dominio vero (opzione "nessun avviso") |
-| `-server`, `-host-pubblico`, `-ip-pubblico` | – | modalità server su internet (VPS), vedi [deploy/server](deploy/server/README.md) |
 
 Cartella dati predefinita: `%AppData%\Charlie26` su Windows e `~/Library/Application Support/Charlie26` su Mac (se trova la cartella `IntercomRegia` delle versioni precedenti, la riprende da sola). Contiene `evento.json` (configurazione; delle password è salvata solo un'impronta non reversibile, non la password in chiaro), `intercom.log` (registro dell'ultima esecuzione; quello precedente è `intercom.log.1`), `impostazioni.json` (rete scelta), le cartelle `modelli` e `immagini` e la sottocartella `certificati`. Per ripartire da un evento vuoto cancella `evento.json`; per ricreare il certificato cancella `certificati`.
 
