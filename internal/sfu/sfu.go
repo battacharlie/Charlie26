@@ -14,7 +14,6 @@ package sfu
 import (
 	"fmt"
 	"log"
-	"net"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -35,13 +34,6 @@ type Config struct {
 	// UDPPort è l'unica porta UDP usata da tutti i flussi audio/video.
 	// Una porta sola semplifica molto il firewall di Windows.
 	UDPPort int
-	// PublicIP è l'IP pubblico da annunciare ai telefoni quando il computer
-	// sta dietro un NAT (VPS con IP "mappato"). Vuoto = si usano gli IP delle
-	// schede di rete, che va bene in rete locale e sui VPS con IP diretto.
-	PublicIP string
-	// TCPListener, se presente, abilita il ripiego su ICE-TCP: serve alle reti
-	// (alberghi, aziende) che bloccano l'UDP ma lasciano passare la porta 443/TCP.
-	TCPListener net.Listener
 	// Event è la configurazione iniziale (canali, utenti, modalità).
 	Event *evento.Event
 	// Save viene chiamata a ogni modifica dell'evento (può essere nil).
@@ -85,7 +77,6 @@ type PeerInfo struct {
 type Room struct {
 	api *webrtc.API
 	mux ice.UDPMux
-	tcp ice.TCPMux
 
 	mu        sync.Mutex
 	event     *evento.Event
@@ -188,23 +179,12 @@ func NewRoom(cfg Config) (*Room, error) {
 		return nil, fmt.Errorf("porta UDP %d non disponibile: %w", cfg.UDPPort, err)
 	}
 	se.SetICEUDPMux(mux)
-	var tcpMux ice.TCPMux
-	if cfg.TCPListener != nil {
-		tcpMux = ice.NewTCPMuxDefault(ice.TCPMuxParams{Listener: cfg.TCPListener, ReadBufferSize: 20})
-		se.SetICETCPMux(tcpMux)
-		se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeTCP4})
-	}
 	se.SetIncludeLoopbackCandidate(true)
-	if cfg.PublicIP != "" {
-		// Modalità server dietro NAT: i telefoni devono ricevere l'IP pubblico.
-		se.SetNAT1To1IPs([]string{cfg.PublicIP}, webrtc.ICECandidateTypeHost)
-	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithInterceptorRegistry(ir), webrtc.WithSettingEngine(se))
 	return &Room{
 		api:      api,
 		mux:      mux,
-		tcp:      tcpMux,
 		event:    cfg.Event.Clone(),
 		save:     cfg.Save,
 		sessions: map[string]string{},
@@ -258,9 +238,6 @@ func (r *Room) Close() error {
 	r.mu.Unlock()
 	for _, id := range ids {
 		r.StopWHIP(id)
-	}
-	if r.tcp != nil {
-		_ = r.tcp.Close()
 	}
 	return r.mux.Close()
 }
@@ -324,14 +301,6 @@ func (r *Room) Join(req JoinRequest, send func(Message)) (*Peer, error) {
 	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		log.Printf("[%s] connessione: %s", p.Label, s)
-		if s == webrtc.PeerConnectionStateConnected {
-			// Diagnostica: dice se il telefono sta usando UDP o il ripiego TCP.
-			if sc := pc.SCTP(); sc != nil && sc.Transport() != nil {
-				if pair, err := sc.Transport().ICETransport().GetSelectedCandidatePair(); err == nil && pair != nil && pair.Local != nil && pair.Remote != nil {
-					log.Printf("[%s] percorso: %s (locale %s:%d ← remoto %s:%d)", p.Label, pair.Local.Protocol, pair.Local.Address, pair.Local.Port, pair.Remote.Address, pair.Remote.Port)
-				}
-			}
-		}
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			go p.Close()
 		}
